@@ -25,3 +25,4 @@ rebel.xml
 logs/
 temp/
 .gradle/
+out/
