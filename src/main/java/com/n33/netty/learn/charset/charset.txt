@@ -1,0 +1,56 @@
+ASCII (American Standard Code for Information Interchange, 美国信息交换标准代码)
+
+7 bit表示一个字符，共计128种字符(不充分使用一位，一位8字节)
+
+ISO-8859-1
+
+8 bit表示一个字符，即用一个字节 (byte) (8 bit) 来表示一个字符，共计可以表示256个字符
+充分利用每个字节，向下兼容(ASCII)
+
+gb2312 中国
+
+两个字节表示一个汉字(常用汉字)
+
+gbk(gb2312超集)
+
+比gb2312多XX个汉字(多余部分汉字)
+
+gb18030
+
+最完整汉字表现形式
+
+big5 台湾
+
+繁体中文
+
+unicode 所有字符编码形式，采用的两个字节表示一个字符
+
+存储空间太过膨胀，对英文有着巨大浪费
+
+UTF, Unicode Translation Format (Unicode转换格式)
+
+unicode是一种编码方式, UTF则是一种存储方式; UTF-8是Unicode的实现方式之一
+
+UTF1-6LE (little endian 小端), UTF16-BE (big endian) 大端
+
+Zero Width No-Break Space(零宽度不间断空间,不存在的空间，用于判定), 0xFRFF(BE) , 0xFFFE(LE)
+
+UTF-8, 变长字节表示形式
+
+1个字节表示英文,兼容于 ASCII,ISO-8859-1,
+一般来说，UTF-8会通过3个字节表示一个中文
+最多6个字节
+
+BOM(Byte Order Mark),window等才会存在，和16一样，是个解析头，解析灾难******
+
+UTF32(不常用)
+
+
+你好（UTF-8）
+XX XX XX | XX XX XX
+  完整   |  完整
+你好（ISO-8859-1）
+XX XX XX | XX XX XX
+完整 完整 完整 | 完整 完整 完整
+
+源文件GBK，只要接收文件GBK则不会乱码

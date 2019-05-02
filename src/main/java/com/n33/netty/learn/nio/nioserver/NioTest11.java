@@ -1,4 +1,4 @@
-package com.n33.netty.learn.nio;
+package com.n33.netty.learn.nio.nioserver;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
