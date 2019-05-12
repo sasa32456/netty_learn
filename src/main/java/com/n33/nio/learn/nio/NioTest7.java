@@ -1,4 +1,4 @@
-package com.n33.netty.learn.nio;
+package com.n33.nio.learn.nio;
 
 import java.nio.ByteBuffer;
 
@@ -20,7 +20,7 @@ public class NioTest7 {
         /**
          * Exception in thread "main" java.nio.ReadOnlyBufferException
          * 	at java.nio.HeapByteBufferR.put(HeapByteBufferR.java:181)
-         * 	at com.n33.netty.learn.nio.NioTest7.main(NioTest7.java:)
+         * 	at com.n33.nio.learn.nio.NioTest7.main(NioTest7.java:)
          */
         System.out.println(readOnlyBuffer);
 

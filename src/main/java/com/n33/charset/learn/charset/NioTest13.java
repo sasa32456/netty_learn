@@ -1,4 +1,4 @@
-package com.n33.netty.learn.charset;
+package com.n33.charset.learn.charset;
 
 import java.io.File;
 import java.io.IOException;

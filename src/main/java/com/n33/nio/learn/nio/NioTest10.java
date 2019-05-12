@@ -1,4 +1,4 @@
-package com.n33.netty.learn.nio;
+package com.n33.nio.learn.nio;
 
 import java.io.RandomAccessFile;
 import java.nio.channels.FileChannel;

@@ -1,4 +1,4 @@
-package com.n33.netty.learn.nio;
+package com.n33.nio.learn.nio;
 
 import java.io.RandomAccessFile;
 import java.nio.MappedByteBuffer;
@@ -24,7 +24,7 @@ public class NioTest9 {
         /** Exception in thread "main" java.lang.IndexOutOfBoundsException
          * 	at java.nio.Buffer.checkIndex(Buffer.java:540)
          * 	at java.nio.DirectByteBuffer.put(DirectByteBuffer.java:306)
-         * 	at com.n33.netty.learn.nio.NioTest9.main(NioTest9.java:17)
+         * 	at com.n33.nio.learn.nio.NioTest9.main(NioTest9.java:17)
          */
         mappedByteBuffer.put(3, (byte) 'b');
         randomAccessFile.close();
