@@ -30,7 +30,7 @@ public class WebSocketChannelInitializer extends ChannelInitializer<SocketChanne
          * 用于处理webSocketFrame六种类型
          * ws://localhost:9999/ws
          */
-        pipeline.addLast(new WebSocketServerProtocolHandler("/ws"));
+        pipeline.addLast(new WebSocketServerProtocolHandler("/ws/example"));
 
         pipeline.addLast(new TextWebSocketFrameHandler());
 
