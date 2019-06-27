@@ -1,0 +1,18 @@
+syntax = "proto2";
+
+package com.n33.protobuf;
+
+option optimize_for = SPEED;
+option java_package = "com.n33.netty.learn.sixthexample";
+option java_outer_classname = "MyDataInfo";
+
+message Person {
+    required string name =1;
+    optional int32 age =2;
+    optional string address = 3;
+
+}
+
+
+//cmd 。。。。。 protoc -h 查看帮助
+//protoc --java_out=src/main/java src/protobuf/Student.proto
