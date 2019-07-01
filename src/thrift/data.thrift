@@ -1,4 +1,6 @@
 namespace java thrift.generated
+#生成python代码，Python暂时不学。。。也没多久就学吧大概，转行之前？哈哈
+namespace py py.thrift.generated
 
 typedef i16 short
 typedef i32 int
