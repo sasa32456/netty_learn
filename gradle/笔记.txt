@@ -1,0 +1,19 @@
+gradlew => gradle wrapper
+gradlew 自动解决大部分版本等很多问题
+
+gradle wrapper
+会生成gradle/gradlew.jar，用于后人不用安装gradle也可以打包
+
+
+gradlew在build.gradle中的
+
+task wrapper(type:Wrapper){
+    gradleVersion = '3.4'
+    distributionType = 'all'
+}
+
+
+shasum -a 256 gradle-3.4-all.zip
+.......................................
+放入gradle-wrapper.properties
+distributionSha256Sum=............................
