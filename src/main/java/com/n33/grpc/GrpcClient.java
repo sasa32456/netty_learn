@@ -30,44 +30,20 @@ public class GrpcClient {
         //异步
         StudentServiceGrpc.StudentServiceStub stub= StudentServiceGrpc.newStub(managedChannel);
 
-
         /**
-         * 双向流传递
+         * 执行方法区
          */
-        StreamObserver<StreamRequest> requestStreamObserver = stub.biTalk(new StreamObserver<StreamResponse>() {
-            @Override
-            public void onNext(StreamResponse value) {
-                System.out.println(value.getResponseInfo());
-            }
-
-            @Override
-            public void onError(Throwable t) {
-                System.out.println(t.getMessage());
-            }
-
-            @Override
-            public void onCompleted() {
-                System.out.println("onCompleted");
-            }
-        });
-
-        IntStream.range(0, 10).forEach(i->{
-            requestStreamObserver.onNext(StreamRequest.newBuilder().setRequestInfo(LocalDateTime.now().toString()).build());
-            try {
-                TimeUnit.SECONDS.sleep(1);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        });
-
-
+        oneReturnOne(blockingStub);
+//        oneReturnStream(blockingStub);
+//        streamReturnOne(stub);
+//        streamReturnStream(stub);
 
 
 
         /**
-         * 阻塞防止JVM关闭影响异步通信
+         * 自然关闭防止异常,同时防止双向流异步走完main方法导致JVM停止
          */
-        TimeUnit.SECONDS.sleep(5);
+        managedChannel.shutdown().awaitTermination(5, TimeUnit.SECONDS);
     }
 
 
@@ -135,5 +111,37 @@ public class GrpcClient {
         studentRequestStreamObserver.onCompleted();
     }
 
+
+
+    /**
+     * 双向流传递
+     */
+    private static void streamReturnStream(StudentServiceGrpc.StudentServiceStub stub) {
+        StreamObserver<StreamRequest> requestStreamObserver = stub.biTalk(new StreamObserver<StreamResponse>() {
+            @Override
+            public void onNext(StreamResponse value) {
+                System.out.println(value.getResponseInfo());
+            }
+
+            @Override
+            public void onError(Throwable t) {
+                System.out.println(t.getMessage());
+            }
+
+            @Override
+            public void onCompleted() {
+                System.out.println("onCompleted");
+            }
+        });
+
+        IntStream.range(0, 10).forEach(i->{
+            requestStreamObserver.onNext(StreamRequest.newBuilder().setRequestInfo(LocalDateTime.now().toString()).build());
+            try {
+                TimeUnit.SECONDS.sleep(1);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        });
+    }
 
 }
