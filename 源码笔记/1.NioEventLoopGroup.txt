@@ -1,0 +1,341 @@
+EventLoopGroup事件循环组 -- 以后学Markdown再用高级的，学习时间未知。。。
+
+阅读规则：顺序，父子弹跳
+
+Test一些提出来的测试代码（不重要）,基于secondExample
+
+
+
+=============================================EventLoopGroup==========================================================
+/**
+ * 特殊的{@link EventExecutorGroup}允许注册{@link Channel}，以便在事件循环期间进行处理以供以后选择。
+ --在事件循环过程中，注册事件，也就是channel（连接）
+ */
+public interface EventLoopGroup extends EventExecutorGroup {
+
+   /**
+     * 返回下一个{@link EventLoop}以使用
+     --返回下一个要发生使用的事件循环（不断有事件发生的死循环）
+     */
+    @Override
+    EventLoop next();
+
+    /**
+     * Register a {@link Channel} with this {@link EventLoop}. The returned {@link ChannelFuture} will get notified once the registration was complete.
+     * 使用此{@link EventLoop}注册{@link Channel}。注册完成后，将返回返回的{@link ChannelFuture}。
+     --将一个连接注册到循环当中，将注册完成后将返回的一个ChannelFuture（通知，响应）
+     --ChannelFuture extends Future<Void> extends java.util.concurrent.Future<V>
+     */
+    ChannelFuture register(Channel channel);
+
+    /**
+     * Register a {@link Channel} with this {@link EventLoop} using a {@link ChannelFuture}. The passed {@link ChannelFuture} will get notified once the registration was complete and also will get returned.
+       使用{@link ChannelFuture}向此{@link EventLoop}注册{@link频道}。传递的{@link ChannelFuture}将在注册完成后收到通知，并将返回。
+       将一个事件使用channelFuture（ChannelPromise）将channel注册到eventLoop中，注册完成后ChannelPromise将返回通知
+       --ChannelPromise包含了channel的一个引用
+       public interface ChannelPromise extends ChannelFuture, Promise<Void> {
+           @Override
+           Channel channel();
+           。。。
+           }
+     */
+    ChannelFuture register(ChannelPromise promise);
+
+--------------------------------------废弃
+    /**
+     * Register a {@link Channel} with this {@link EventLoop}. The passed {@link ChannelFuture}
+     * will get notified once the registration was complete and also will get returned.
+     *
+     * @deprecated Use {@link #register(ChannelPromise)} instead.
+     */
+    @Deprecated--不建议被使用
+    ChannelFuture register(Channel channel, ChannelPromise promise);
+
+}
+
+=======================================================================================================
+
+
+
+
+
+
+=============================================EventExecutorGroup==========================================================
+
+/**
+ * The {@link EventExecutorGroup} is responsible for providing the {@link EventExecutor}'s to use via its {@link #next()} method. Besides this, it is also responsible for handling their life-cycle and allows shutting them down in a global fashion.
+ * {@link EventExecutorGroup}负责通过其{@link #next（）}方法提供{@link EventExecutor}。除此之外，它还负责处理它们的生命周期并允许以全球方式关闭它们。
+ --通过next方法获得执行器 Executor（执行者/执行器）
+ */
+public interface EventExecutorGroup extends ScheduledExecutorService, Iterable<EventExecutor> {
+    。。。
+    /**
+     * Returns one of the {@link EventExecutor}s managed by this {@link EventExecutorGroup}.
+       返回由此{@link EventExecutorGroup}管理的{@link EventExecutor}之一。
+     */
+    EventExecutor next();
+    。。。
+}
+
+
+=============================================NioEventLoopGroup==========================================================
+
+/**
+ * {@link MultithreadEventLoopGroup} implementations which is used for NIO {@link Selector} based {@link Channel}s.
+   {@link multithreadeventloopgroup}实现，用于基于{@link channel}的nio {@link selector}。
+ */
+public class NioEventLoopGroup extends MultithreadEventLoopGroup {
+
+    /**
+     * Create a new instance using the default number of threads, the default {@link ThreadFactory} and the {@link SelectorProvider} which is returned by {@link SelectorProvider#provider()}.
+     --使用默认的线程数创建一个新实例，默认的{@link ThreadFactory}和{@link SelectorProvider}由{@link SelectorProvider＃provider（）}返回。
+     */
+    public NioEventLoopGroup() {
+        this(0);
+    }
+
+    /**
+     * Create a new instance using the specified number of threads, {@link ThreadFactory} and the {@link SelectorProvider} which is returned by {@link SelectorProvider#provider()}.
+       使用指定数量的线程{@link ThreadFactory}和{@link SelectorProvider}创建一个新实例，该链接由{@link SelectorProvider＃provider（）}返回。
+     */
+    public NioEventLoopGroup(int nThreads) {
+        this(nThreads, (Executor) null);
+    }
+
+    /**
+     * Create a new instance using the specified number of threads, the given {@link ThreadFactory} and the {@link SelectorProvider} which is returned by {@link SelectorProvider#provider()}.
+     * 使用指定数量的线程创建新实例，给定的{@link ThreadFactory}和{@link SelectorProvider}由{@link SelectorProvider＃provider（）}返回。
+
+          * Returns the system-wide default selector provider for this invocation of the Java virtual machine.
+          * 返回此Java虚拟机调用的系统范围默认选择器提供程序。
+          * <p> The first invocation of this method locates the default provider object as follows: </p>
+          * <p> 第一次调用此方法将按如下方式定位默认提供程序对象： </p>
+          * <ol>
+          *   <li><p> 如果是系统属性
+          * <tt> java.nio.channels.spi.SelectorProvider </ tt>已定义，然后它被视为具体提供程序类的完全限定名称。该类被加载并实例化;如果此过程失败，则抛出未指定的错误。 </ p> </ LI>
+          *   <li><p> 如果提供程序类已安装在jar文件中对系统类加载器可见，并且该jar文件包含一个provider-configuration文件命名
+          *   <tt>资源目录<tt> META-INF / services </ tt>中的java.nio.channels.spi.SelectorProvider </ tt>，然后获取该文件中指定的第一个类名。该类被加载并实例化;如果此过程失败，则抛出未指定的错误。 </p></li>
+          *
+          *   <li><p> 最后，如果没有通过上述任何方式指定提供程序，则实例化系统缺省提供程序类并返回结果。 </p></li>
+          * </ol>
+          *
+          * <p> 此方法的后续调用将返回第一次调用返回的提供程序。  </p>
+          * @return  The system-wide default selector provider
+         public static SelectorProvider provider() {
+     */
+    public NioEventLoopGroup(int nThreads, ThreadFactory threadFactory) {
+        this(nThreads, threadFactory, SelectorProvider.provider());
+    }
+
+    /**
+     * 工厂使用默认选择策略。
+     *  public final class DefaultSelectStrategyFactory implements SelectStrategyFactory {
+     *    public static final SelectStrategyFactory INSTANCE = new DefaultSelectStrategyFactory();
+     *      private DefaultSelectStrategyFactory() { }
+     *      @Override
+     *      public SelectStrategy newSelectStrategy() {
+     *          return DefaultSelectStrategy.INSTANCE;
+     *      }
+     *  }
+    /
+    public NioEventLoopGroup(
+            int nThreads, Executor executor, final SelectorProvider selectorProvider) {
+        this(nThreads, executor, selectorProvider, DefaultSelectStrategyFactory.INSTANCE);
+    }
+
+
+
+    /**
+     * 公开帮助方法，创建不同的{@link RejectedExecutionHandler}。
+      public final class RejectedExecutionHandlers {
+        拒绝策略
+     */
+    public NioEventLoopGroup(int nThreads, Executor executor, final SelectorProvider selectorProvider,
+                             final SelectStrategyFactory selectStrategyFactory) {
+        super(nThreads, executor, selectorProvider, selectStrategyFactory, RejectedExecutionHandlers.reject());
+    }
+    。。。
+}
+
+
+
+
+=============================================MultithreadEventLoopGroup==========================================================
+/**
+ * Abstract base class for {@link EventLoopGroup} implementations that handles their tasks with multiple threads at the same time.
+ * {@link EventLoopGroup}实现的抽象基类，它同时处理多个线程的任务。
+ */
+public abstract class MultithreadEventLoopGroup extends MultithreadEventExecutorGroup implements EventLoopGroup {
+    。。。
+    /**
+     * @see MultithreadEventExecutorGroup#MultithreadEventExecutorGroup(int, Executor, Object...)
+     */
+    protected MultithreadEventLoopGroup(int nThreads, Executor executor, Object... args) {
+        super(nThreads == 0 ? DEFAULT_EVENT_LOOP_THREADS : nThreads, executor, args);
+    }
+    。。。
+}
+
+
+
+=============================================MultithreadEventLoopGroup==========================================================
+
+/**
+ * {@link EventLoopGroup}实现的抽象基类，它同时处理多个线程的任务。
+ */
+public abstract class MultithreadEventLoopGroup extends MultithreadEventExecutorGroup implements EventLoopGroup {
+
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(MultithreadEventLoopGroup.class);
+
+    private static final int DEFAULT_EVENT_LOOP_THREADS;
+
+
+
+    /**
+     * A collection of utility methods to retrieve and parse the values of the Java system properties.
+     * public final class SystemPropertyUtil {
+     **
+     *       * Returns the value of the Java system property with the specified {@code key}, while falling back to the specified default value if the property access fails.
+              返回具有指定的{@code key}的Java系统属性的值，如果属性访问失败，则返回到指定的默认值。
+     *       *
+     *       * @return the property value.
+     *       *         {@code def} if there's no such property or if an access to the
+     *       *         specified property is not allowed.
+     *
+     *      public static int getInt(String key, int def) {
+     *          String value = get(key);
+     *          if (value == null) {
+     *              return def;
+     *          }
+     *
+     *          value = value.trim();
+     *          try {
+     *              return Integer.parseInt(value);
+     *          } catch (Exception e) {
+     *              // Ignore
+     *          }
+     *
+     *          logger.warn(
+     *                  "Unable to parse the integer system property '{}':{} - using the default value: {}",
+     *                  key, value, def
+     *          );
+     *
+     *          return def;
+     *      }
+     * }
+     */
+
+    static {
+        DEFAULT_EVENT_LOOP_THREADS = Math.max(1, SystemPropertyUtil.getInt(
+                //系统属性，没配置，所以取后者，可用核心数*2 NettyRuntime=是否配置"io.netty.availableProcessors",Runtime.getRuntime().availableProcessors());
+                "io.netty.eventLoopThreads", NettyRuntime.availableProcessors() * 2));
+        。。。日志，可以学，翻源码滑稽，第一次出现不删
+          if (logger.isDebugEnabled()) {
+                    logger.debug("-Dio.netty.eventLoopThreads: {}", DEFAULT_EVENT_LOOP_THREADS);
+          }
+    }
+    。。。
+}
+
+
+=============================================MultithreadEventExecutorGroup==========================================================
+/**
+ * Abstract base class for {@link EventExecutorGroup} implementations that handles their tasks with multiple threads at
+ * the same time.
+ */
+public abstract class MultithreadEventExecutorGroup extends AbstractEventExecutorGroup {
+
+    private final EventExecutor[] children;
+    private final Set<EventExecutor> readonlyChildren;
+    private final AtomicInteger terminatedChildren = new AtomicInteger();
+    private final Promise<?> terminationFuture = new DefaultPromise(GlobalEventExecutor.INSTANCE);
+    private final EventExecutorChooserFactory.EventExecutorChooser chooser;
+
+    /**
+     * Create a new instance.
+     *
+     * @param nThreads          the number of threads that will be used by this instance.
+     * @param executor          the Executor to use, or {@code null} if the default should be used.
+     * @param args              arguments which will passed to each {@link #newChild(Executor, Object...)} call
+     */
+    protected MultithreadEventExecutorGroup(int nThreads, Executor executor, Object... args) {
+        this(nThreads, executor, DefaultEventExecutorChooserFactory.INSTANCE, args);
+    }
+
+
+
+    /**
+         * Create a new instance. -----用于初始化赋值
+         *
+         * @param nThreads          the number of threads that will be used by this instance.
+         * @param executor          the Executor to use, or {@code null} if the default should be used.
+         * @param chooserFactory    the {@link EventExecutorChooserFactory} to use.
+         * @param args              arguments which will passed to each {@link #newChild(Executor, Object...)} call
+         */
+        protected MultithreadEventExecutorGroup(int nThreads, Executor executor,
+                                                EventExecutorChooserFactory chooserFactory, Object... args) {
+            if (nThreads <= 0) {
+                throw new IllegalArgumentException(String.format("nThreads: %d (expected: > 0)", nThreads));
+            }
+
+            if (executor == null) {
+                executor = new ThreadPerTaskExecutor(newDefaultThreadFactory());
+            }
+
+            children = new EventExecutor[nThreads];
+
+            for (int i = 0; i < nThreads; i ++) {
+                boolean success = false;
+                try {
+                    children[i] = newChild(executor, args);
+                    success = true;
+                } catch (Exception e) {
+                    // TODO: Think about if this is a good exception type
+                    throw new IllegalStateException("failed to create a child event loop", e);
+                } finally {
+                    if (!success) {
+                        for (int j = 0; j < i; j ++) {
+                            children[j].shutdownGracefully();
+                        }
+
+                        for (int j = 0; j < i; j ++) {
+                            EventExecutor e = children[j];
+                            try {
+                                while (!e.isTerminated()) {
+                                    e.awaitTermination(Integer.MAX_VALUE, TimeUnit.SECONDS);
+                                }
+                            } catch (InterruptedException interrupted) {
+                                // Let the caller handle the interruption.
+                                Thread.currentThread().interrupt();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            chooser = chooserFactory.newChooser(children);
+
+            final FutureListener<Object> terminationListener = new FutureListener<Object>() {
+                @Override
+                public void operationComplete(Future<Object> future) throws Exception {
+                    if (terminatedChildren.incrementAndGet() == children.length) {
+                        terminationFuture.setSuccess(null);
+                    }
+                }
+            };
+
+            for (EventExecutor e: children) {
+                e.terminationFuture().addListener(terminationListener);
+            }
+
+            Set<EventExecutor> childrenSet = new LinkedHashSet<EventExecutor>(children.length);
+            Collections.addAll(childrenSet, children);
+            readonlyChildren = Collections.unmodifiableSet(childrenSet);
+        }
+
+    。。。
+}
+
+
+到此为止，得出EventLoopGroup只是初始化赋值,作为事件执行器。。。。。。恐怖

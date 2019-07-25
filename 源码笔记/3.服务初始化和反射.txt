@@ -1,0 +1,629 @@
+
+=========================================ServerBootstrap=================================================
+
+/**
+ * {@link Bootstrap} sub-class which allows easy bootstrap of {@link ServerChannel}
+ * {@link Bootstrap}子类，允许轻松引导{@link ServerChannel}
+ */
+public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerChannel> {
+
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(ServerBootstrap.class);
+
+    private final Map<ChannelOption<?>, Object> childOptions = new LinkedHashMap<ChannelOption<?>, Object>();
+    private final Map<AttributeKey<?>, Object> childAttrs = new LinkedHashMap<AttributeKey<?>, Object>();
+    private final ServerBootstrapConfig config = new ServerBootstrapConfig(this);
+    private volatile EventLoopGroup childGroup;
+    private volatile ChannelHandler childHandler;
+
+    public ServerBootstrap() { }
+
+    private ServerBootstrap(ServerBootstrap bootstrap) {
+        super(bootstrap);
+        childGroup = bootstrap.childGroup;
+        childHandler = bootstrap.childHandler;
+        synchronized (bootstrap.childOptions) {
+            childOptions.putAll(bootstrap.childOptions);
+        }
+        synchronized (bootstrap.childAttrs) {
+            childAttrs.putAll(bootstrap.childAttrs);
+        }
+    }
+
+}
+
+
+===================ServerChannel==================
+
+/**
+ * A {@link Channel} that accepts an incoming connection attempt and creates its child {@link Channel}s by accepting them.  {@link ServerSocketChannel} is a good example.
+ * 一个{@link Channel}接受传入连接尝试并通过接受它们来创建其子{@link Channel}。 {@link ServerSocketChannel}就是一个很好的例子。
+ */
+public interface ServerChannel extends Channel {
+    // This is a tag interface.--一个标记接口
+}
+
+
+
+==========================ServerSocketChannel=========================
+/**
+ * A TCP/IP {@link ServerChannel} which accepts incoming TCP/IP connections.
+ * TCP / IP {@link ServerChannel}，它接受​​传入的TCP / IP连接。
+ */
+public interface ServerSocketChannel extends ServerChannel {
+    @Override
+    ServerSocketChannelConfig config();
+    @Override
+    InetSocketAddress localAddress();
+    @Override
+    InetSocketAddress remoteAddress();
+}
+
+
+============================Channel==================
+
+/**
+ * 网络套接字或能够执行I / O操作（如读取，写入，连接和绑定）的组件的连接。
+ */
+public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparable<Channel> {}
+
+
+=========================================ServerBootstrap=================================================
+/**
+ * {@link Bootstrap} sub-class which allows easy bootstrap of {@link ServerChannel}
+ * --此处为gruop--成员变量赋值
+ */
+public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerChannel> {
+
+    /**
+     * Specify the {@link EventLoopGroup} which is used for the parent (acceptor) and the child (client).
+     * 指定用于父（接受者）和子（客户端）的{@link EventLoopGroup}。
+     */
+    @Override
+    public ServerBootstrap group(EventLoopGroup group) {
+        return group(group, group);
+    }
+
+    /**
+     * Set the {@link EventLoopGroup} for the parent (acceptor) and the child (client). These {@link EventLoopGroup}'s are used to handle all the events and IO for {@link ServerChannel} and {@link Channel}'s.
+     * 为父（acceptor）和子（client）设置{@link EventLoopGroup}。这些{@link EventLoopGroup}用于处理{@link ServerChannel}和{@link Channel}的所有事件和IO。
+     */
+    public ServerBootstrap group(EventLoopGroup parentGroup, EventLoopGroup childGroup) {
+        super.group(parentGroup);
+        if (childGroup == null) {
+            throw new NullPointerException("childGroup");
+        }
+        if (this.childGroup != null) {
+            throw new IllegalStateException("childGroup set already");
+        }
+        this.childGroup = childGroup;
+        return this;
+    }
+
+。。。
+}
+
+
+
+=========================================AbstractBootstrap=================================================
+
+/**
+ * {@link AbstractBootstrap} is a helper class that makes it easy to bootstrap a {@link Channel}. It support method-chaining to provide an easy way to configure the {@link AbstractBootstrap}.
+ * <p>When not used in a {@link ServerBootstrap} context, the {@link #bind()} methods are useful for connectionless transports such as datagram (UDP).</p>
+ * {@link AbstractBootstrap}是一个帮助类，可以轻松引导{@link Channel}。它支持方法链，以提供配置{@link AbstractBootstrap}的简便方法。
+ * <p>如果未在{@link ServerBootstrap}上下文中使用，{@link #bind（）}方法对于无连接传输（如数据报（UDP））非常有用。</ p>
+ */
+public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C extends Channel> implements Cloneable {
+
+    volatile EventLoopGroup group;
+    @SuppressWarnings("deprecation")
+    private volatile ChannelFactory<? extends C> channelFactory;
+    private volatile SocketAddress localAddress;
+    private final Map<ChannelOption<?>, Object> options = new LinkedHashMap<ChannelOption<?>, Object>();
+    private final Map<AttributeKey<?>, Object> attrs = new LinkedHashMap<AttributeKey<?>, Object>();
+    private volatile ChannelHandler handler;
+
+    AbstractBootstrap() {
+        // Disallow extending from a different package.
+    }
+
+    AbstractBootstrap(AbstractBootstrap<B, C> bootstrap) {
+        group = bootstrap.group;
+        channelFactory = bootstrap.channelFactory;
+        handler = bootstrap.handler;
+        localAddress = bootstrap.localAddress;
+        synchronized (bootstrap.options) {
+            options.putAll(bootstrap.options);
+        }
+        synchronized (bootstrap.attrs) {
+            attrs.putAll(bootstrap.attrs);
+        }
+    }
+
+    /**
+     * The {@link EventLoopGroup} which is used to handle all the events for the to-be-created {@link Channel}
+     * {@link EventLoopGroup}，用于处理即将创建的{@link Channel}的所有事件
+     */
+    public B group(EventLoopGroup group) {
+        if (group == null) {
+            throw new NullPointerException("group");
+        }
+        if (this.group != null) {
+            throw new IllegalStateException("group set already");
+        }
+        this.group = group;
+        return self();
+    }
+
+
+
+    @SuppressWarnings("unchecked")
+    private B self() {
+        return (B) this;
+    }
+
+    /**
+     * The {@link Class} which is used to create {@link Channel} instances from. You either use this or {@link #channelFactory(io.netty.channel.ChannelFactory)} if your {@link Channel} implementation has no no-args constructor.
+     * {@link Class}，用于创建{@link Channel}实例。如果您的{@link Channel}实现没有no-args构造函数，您可以使用此函数或{@link #channelFactory（io.netty.channel.ChannelFactory）}。
+     */
+    public B channel(Class<? extends C> channelClass) {
+        if (channelClass == null) {
+            throw new NullPointerException("channelClass");
+        }
+        return channelFactory(new ReflectiveChannelFactory<C>(channelClass));
+    }
+
+
+    /**
+     * {@link io.netty.channel.ChannelFactory} which is used to create {@link Channel} instances from when calling {@link #bind()}. This method is usually only used if {@link #channel(Class)} is not working for you because of some more complex needs. If your {@link Channel} implementation has a no-args constructor, its highly recommend to just use {@link #channel(Class)} to simplify your code.
+     * {@link io.netty.channel.ChannelFactory}，用于在调用{@link #bind（）}时创建{@link Channel}实例。此方法通常仅在{@link #channel（Class）}不适合您时使用，因为某些更复杂的需求。如果您的{@link Channel}实现具有no-args构造函数，强烈建议您使用{@link #channel（Class）}来简化代码。
+     */
+    @SuppressWarnings({ "unchecked", "deprecation" })
+    public B channelFactory(io.netty.channel.ChannelFactory<? extends C> channelFactory) {
+        return channelFactory((ChannelFactory<C>) channelFactory);
+    }
+
+
+     /**
+      * @deprecated Use {@link #channelFactory(io.netty.channel.ChannelFactory)} instead.
+      * @deprecated使用{@link #channelFactory（io.netty.channel.ChannelFactory）}代替。
+      */
+     @Deprecated
+     public B channelFactory(ChannelFactory<? extends C> channelFactory) {
+         if (channelFactory == null) {
+             throw new NullPointerException("channelFactory");
+         }
+         if (this.channelFactory != null) {
+             throw new IllegalStateException("channelFactory set already");
+         }
+
+         this.channelFactory = channelFactory;
+         return self();
+     }
+
+。。。
+}
+
+
+=========================================ReflectiveChannelFactory========
+/**
+ * A {@link ChannelFactory} that instantiates a new {@link Channel} by invoking its default constructor reflectively.
+ * {@link ChannelFactory}通过反射调用其默认构造函数来实例化新的{@link Channel}。
+ */
+public class ReflectiveChannelFactory<T extends Channel> implements ChannelFactory<T> {
+
+    private final Constructor<? extends T> constructor;
+
+    public ReflectiveChannelFactory(Class<? extends T> clazz) {
+        ObjectUtil.checkNotNull(clazz, "clazz");
+        try {
+            this.constructor = clazz.getConstructor();
+        } catch (NoSuchMethodException e) {
+            throw new IllegalArgumentException("Class " + StringUtil.simpleClassName(clazz) +
+                    " does not have a public non-arg constructor", e);
+        }
+    }
+
+ @Override
+ public T newChannel() {
+     try {
+         return constructor.newInstance();
+     } catch (Throwable t) {
+         throw new ChannelException("Unable to create Channel from class " + constructor.getDeclaringClass(), t);
+     }
+ }
+
+
+。。。
+}
+
+
+=========================================NioServerSocketChannel=================================================
+/**
+ * A {@link io.netty.channel.socket.ServerSocketChannel} implementation which uses NIO selector based implementation to accept new connections.
+ * {@link io.netty.channel.socket.ServerSocketChannel}实现，它使用基于NIO选择器的实现来接受新连接。
+ */
+public class NioServerSocketChannel extends AbstractNioMessageChannel
+                             implements io.netty.channel.socket.ServerSocketChannel {
+
+    private static final ChannelMetadata METADATA = new ChannelMetadata(false, 16);
+    private static final SelectorProvider DEFAULT_SELECTOR_PROVIDER = SelectorProvider.provider();
+
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(NioServerSocketChannel.class);
+
+    private static ServerSocketChannel newSocket(SelectorProvider provider) {
+        try {
+            /**
+             *  Use the {@link SelectorProvider} to open {@link SocketChannel} and so remove condition in  {@link SelectorProvider#provider()} which is called by each ServerSocketChannel.open() otherwise.
+             *  使用{@link SelectorProvider}打开{@link SocketChannel}，删除{@link SelectorProvider＃provider（）}中的条件，否则每个ServerSocketChannel.open（）调用该条件。
+             *
+             *  See <a href="https://github.com/netty/netty/issues/2308">#2308</a>.
+             */
+            return provider.openServerSocketChannel();
+        } catch (IOException e) {
+            throw new ChannelException(
+                    "Failed to open a server socket.", e);
+        }
+    }
+
+    /**
+     * Create a new instance
+     */
+    public NioServerSocketChannel() {
+        this(newSocket(DEFAULT_SELECTOR_PROVIDER));--DEFAULT_SELECTOR_PROVIDER就在上面参数构造
+    }
+
+。。。
+}
+
+
+
+=========================================ServerBootstrap=================================================
+    /**
+     * Set the {@link ChannelHandler} which is used to serve the request for the {@link Channel}'s.
+     * 设置{@link ChannelHandler}，用于提供{@link Channel}的请求。
+     */
+    public ServerBootstrap childHandler(ChannelHandler childHandler) {
+        if (childHandler == null) {
+            throw new NullPointerException("childHandler");
+        }
+        this.childHandler = childHandler;
+        return this;
+    }
+
+
+=========================================AbstractBootstrap=================================================
+    /**
+     * 创建一个新的{@link Channel}并绑定它。
+     */
+    public ChannelFuture bind(int inetPort) {
+        return bind(new InetSocketAddress(inetPort));
+    }
+
+
+  /**
+   * Create a new {@link Channel} and bind it.
+   */
+  public ChannelFuture bind(SocketAddress localAddress) {
+      validate();
+      if (localAddress == null) {
+          throw new NullPointerException("localAddress");
+      }
+      return doBind(localAddress);
+  }
+
+  /**
+   * Validate all the parameters. Sub-classes may override this, but should call the super method in that case.
+   * 验证所有参数。子类可以覆盖它，但在这种情况下应该调用super方法。
+   */
+  public B validate() {
+      if (group == null) {
+          throw new IllegalStateException("group not set");
+      }
+      if (channelFactory == null) {
+          throw new IllegalStateException("channel or channelFactory not set");
+      }
+      return self();
+  }
+
+  @SuppressWarnings("unchecked")
+  private B self() {
+      return (B) this;
+  }
+
+
+  private ChannelFuture doBind(final SocketAddress localAddress) {
+      final ChannelFuture regFuture = initAndRegister();
+      final Channel channel = regFuture.channel();
+      if (regFuture.cause() != null) {
+          return regFuture;
+      }
+
+      if (regFuture.isDone()) {
+          // At this point we know that the registration was complete and successful.
+          ChannelPromise promise = channel.newPromise();
+          doBind0(regFuture, channel, localAddress, promise);
+          return promise;
+      } else {
+          // Registration future is almost always fulfilled already, but just in case it's not.
+          final PendingRegistrationPromise promise = new PendingRegistrationPromise(channel);
+          regFuture.addListener(new ChannelFutureListener() {
+              @Override
+              public void operationComplete(ChannelFuture future) throws Exception {
+                  Throwable cause = future.cause();
+                  if (cause != null) {
+                      // Registration on the EventLoop failed so fail the ChannelPromise directly to not cause an
+                      // IllegalStateException once we try to access the EventLoop of the Channel.
+                      promise.setFailure(cause);
+                  } else {
+                      // Registration was successful, so set the correct executor to use.
+                      // See https://github.com/netty/netty/issues/2586
+                      promise.registered();
+
+                      doBind0(regFuture, channel, localAddress, promise);
+                  }
+              }
+          });
+          return promise;
+      }
+  }
+
+
+  final ChannelFuture initAndRegister() {
+      Channel channel = null;
+      try {
+         //反射,此过程为NioServerSocketChannel的无参构造
+          channel = channelFactory.newChannel();
+          init(channel);
+      } catch (Throwable t) {
+          if (channel != null) {
+              // channel can be null if newChannel crashed (eg SocketException("too many open files"))
+              channel.unsafe().closeForcibly();
+              // as the Channel is not registered yet we need to force the usage of the GlobalEventExecutor
+              return new DefaultChannelPromise(channel, GlobalEventExecutor.INSTANCE).setFailure(t);
+          }
+          // as the Channel is not registered yet we need to force the usage of the GlobalEventExecutor
+          return new DefaultChannelPromise(new FailedChannel(), GlobalEventExecutor.INSTANCE).setFailure(t);
+      }
+
+      ChannelFuture regFuture = config().group().register(channel);
+      if (regFuture.cause() != null) {
+          if (channel.isRegistered()) {
+              channel.close();
+          } else {
+              channel.unsafe().closeForcibly();
+          }
+      }
+
+      // If we are here and the promise is not failed, it's one of the following cases:
+      // 1) If we attempted registration from the event loop, the registration has been completed at this point.
+      //    i.e. It's safe to attempt bind() or connect() now because the channel has been registered.
+      // 2) If we attempted registration from the other thread, the registration request has been successfully
+      //    added to the event loop's task queue for later execution.
+      //    i.e. It's safe to attempt bind() or connect() now:
+      //         because bind() or connect() will be executed *after* the scheduled registration task is executed
+      //         because register(), bind(), and connect() are all bound to the same thread.
+
+      return regFuture;
+  }
+
+
+
+
+=========================================ChannelFuture=================================================
+/**
+ * 异步{@link Channel} I / O操作的结果。
+ * <p>
+ * Netty中的所有I / O操作都是异步的。这意味着任何I / O调用都将立即返回，并且不保证在调用结束时所请求的I / O操作已完成。相反，您将返回一个{@link ChannelFuture}实例，该实例为您提供有关I / O操作的结果或状态的信息。
+ * <p>
+ * {@link ChannelFuture}是<em>未完成</ em>或<em>已完成</ em>。当I / O操作开始时，将创建一个新的未来对象。新的未来最初是未完成的 - 它既没有成功，也没有被取消，也没有被取消，因为I / O操作还没有完成。如果I / O操作成功完成，失败或取消，则将使用更具体的信息（例如失败原因）将未来标记为已完成。请注意，即使失败和取消也属于已完成的状态。
+ * <pre>
+ *                                      +---------------------------+
+ *                                      | Completed successfully    |
+ *                                      +---------------------------+
+ *                                 +---->      isDone() = true      |
+ * +--------------------------+    |    |   isSuccess() = true      |
+ * |        Uncompleted       |    |    +===========================+
+ * +--------------------------+    |    | Completed with failure    |
+ * |      isDone() = false    |    |    +---------------------------+
+ * |   isSuccess() = false    |----+---->      isDone() = true      |
+ * | isCancelled() = false    |    |    |       cause() = non-null  |
+ * |       cause() = null     |    |    +===========================+
+ * +--------------------------+    |    | Completed by cancellation |
+ *                                 |    +---------------------------+
+ *                                 +---->      isDone() = true      |
+ *                                      | isCancelled() = true      |
+ *                                      +---------------------------+
+ * </pre>
+ *
+ * 提供了各种方法来检查I / O操作是否已完成，等待完成，并检索I / O操作的结果。它还允许您添加{@link ChannelFutureListener}，以便在I / O操作完成时收到通知。
+ *
+ * <h3>首选{@link #addListener（GenericFutureListener）}到{@link #await（）} </ h3>
+ *
+ * 建议首选{@link #addListener（GenericFutureListener）}至{@link #await（）}，以便在完成I / O操作时获得通知并执行任何后续任务。
+ * <p> {@link #addListener（GenericFutureListener）}是非阻塞的。它只是将指定的{@link ChannelFutureListener}添加到{@link ChannelFuture}，I / O线程将在完成与未来相关的I / O操作时通知侦听器。 {@link ChannelFutureListener}产生最佳性能和资源利用率，因为它根本不会阻塞，但如果您不习惯事件驱动编程，那么实现顺序逻辑可能会很棘手。
+ * <p>
+ *相比之下，{@ link #await（）}是一个阻塞操作。调用后，调用程序线程将一直阻塞，直到操作完成。使用{@link #await（）}实现顺序逻辑更容易，但调用程序线程在I / O操作完成之前不必要地阻塞，并且线程间通知的成本相对较高。此外，在特定情况下存在死锁的可能性，如下所述。
+ *
+ * <h3>请勿在{@link ChannelHandler} </ h3>内拨打{@link #await（）}
+ * <p> {@link ChannelHandler}中的事件处理程序方法通常由I / O线程调用。如果由I / O线程调用的事件处理程序方法调用{@link #await（）}，则它正在等待的I / O操作可能永远不会完成，因为{@link #await（）}可以阻止它正在等待的I / O操作，这是一个死锁。
+ * <pre>
+ * // BAD - NEVER DO THIS
+ * {@code @Override}
+ * public void channelRead({@link ChannelHandlerContext} ctx, Object msg) {
+ *     {@link ChannelFuture} future = ctx.channel().close();
+ *     future.awaitUninterruptibly();
+ *     // Perform post-closure operation
+ *     // ...
+ * }
+ *
+ * // GOOD
+ * {@code @Override}
+ * public void channelRead({@link ChannelHandlerContext} ctx, Object msg) {
+ *     {@link ChannelFuture} future = ctx.channel().close();
+ *     future.addListener(new {@link ChannelFutureListener}() {
+ *         public void operationComplete({@link ChannelFuture} future) {
+ *             // Perform post-closure operation
+ *             // ...
+ *         }
+ *     });
+ * }
+ * </pre>
+* <p>尽管存在上述缺点，但肯定会有更方便的方式来调用{@link #await（）}。在这种情况下，请确保不要在I / O线程中调用{@link #await（）}。否则，将引发{@link BlockingOperationException}以防止死锁。
+ * <h3>不要混淆I / O超时和等待超时</ h3>
+ *
+ *使用{@link #await（long）}，{@ link #await（long，TimeUnit）}，{@ link #awaitUninterruptibly（long）}或{@link #awaitUninterruptibly（long，TimeUnit）指定的超时值完全与I / O超时无关。如果I / O操作超时，则将来标记为“已完成但失败”，如上图所示。例如，应通过特定于传输的选项配置连接超时：
+ * <pre>
+ * // BAD - NEVER DO THIS
+ * {@link Bootstrap} b = ...;
+ * {@link ChannelFuture} f = b.connect(...);
+ * f.awaitUninterruptibly(10, TimeUnit.SECONDS);
+ * if (f.isCancelled()) {
+ *     // Connection attempt cancelled by user
+ * } else if (!f.isSuccess()) {
+ *     // You might get a NullPointerException here because the future
+ *     // might not be completed yet.
+ *     f.cause().printStackTrace();
+ * } else {
+ *     // Connection established successfully
+ * }
+ *
+ * // GOOD
+ * {@link Bootstrap} b = ...;
+ * // Configure the connect timeout option.
+ * <b>b.option({@link ChannelOption}.CONNECT_TIMEOUT_MILLIS, 10000);</b>
+ * {@link ChannelFuture} f = b.connect(...);
+ * f.awaitUninterruptibly();
+ *
+ * // Now we are sure the future is completed.
+ * assert f.isDone();
+ *
+ * if (f.isCancelled()) {
+ *     // Connection attempt cancelled by user
+ * } else if (!f.isSuccess()) {
+ *     f.cause().printStackTrace();
+ * } else {
+ *     // Connection established successfully
+ * }
+ * </pre>
+ */
+public interface ChannelFuture extends Future<Void> {
+
+
+
+。。。
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+=========================================InetSocketAddress不重要,个屁，等学网络编程底层在搞这个=================================================
+/**
+ *
+ *此类实现了ip套接字地址（ip地址+端口号），它也可以是一对（主机名+端口号），在这种情况下，将尝试解析主机名。如果解析失败，那么地址被称为<i>未解决</ i>但仍可用于某些情况，例如通过代理连接。
+ * <p>
+ * 它提供了一个由套接字用于绑定，连接或作为返回值的不可变对象。
+ * <p>
+ * <i>通配符</ i>是一个特殊的本地IP地址。它通常表示“任何”，只能用于{@code bind}操作。
+ *
+ * @see java.net.Socket
+ * @see java.net.ServerSocket
+ * @since 1.4
+ */
+public class InetSocketAddress extends SocketAddress{
+   /**
+    *创建一个套接字地址，其中IP地址是通配符地址，端口号是指定值。
+    * <p>
+    * 有效端口值介于0和65535之间。{@code zero}的端口号将让系统在{@code bind}操作中选择一个临时端口。
+    * <p>
+    * @param   port    The port number
+    * @throws IllegalArgumentException if the port parameter is outside the specified
+    * range of valid port values.
+    */
+   public InetSocketAddress(int port) {
+       this(InetAddress.anyLocalAddress(), port);
+   }
+
+   /**
+    *
+    * 根据IP地址和端口号创建套接字地址。
+    * <p>
+    * 有效端口值介于0和65535之间。{@code zero}的端口号将让系统在{@code bind}操作中选择一个临时端口。
+    * <P>
+    * A {@code null} address will assign the <i>wildcard</i> address.
+    * <p>
+    * @param   addr    The IP address
+    * @param   port    The port number
+    * @throws IllegalArgumentException if the port parameter is outside the specified
+    * range of valid port values.
+    */
+   public InetSocketAddress(InetAddress addr, int port) { holder = new InetSocketAddressHolder( null,
+                       addr == null ? InetAddress.anyLocalAddress() : addr, checkPort(port));
+   }
+   ...
+}

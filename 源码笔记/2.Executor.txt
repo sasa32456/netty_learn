@@ -1,0 +1,300 @@
+
+=============================================MultithreadEventExecutorGroup==========================================================
+
+/**
+ * Abstract base class for {@link EventExecutorGroup} implementations that handles their tasks with multiple threads at
+ * the same time.
+ */
+public abstract class MultithreadEventExecutorGroup extends AbstractEventExecutorGroup {
+
+    private final EventExecutor[] children;
+    private final Set<EventExecutor> readonlyChildren;
+    private final AtomicInteger terminatedChildren = new AtomicInteger();
+    private final Promise<?> terminationFuture = new DefaultPromise(GlobalEventExecutor.INSTANCE);
+    private final EventExecutorChooserFactory.EventExecutorChooser chooser;
+
+    /**
+     * Create a new instance.
+     */
+    protected MultithreadEventExecutorGroup(int nThreads, ThreadFactory threadFactory, Object... args) {
+        this(nThreads, threadFactory == null ? null : new ThreadPerTaskExecutor(threadFactory), args);
+    }
+
+    /**
+     * Create a new instance.
+     *
+     * @param nThreads          the number of threads that will be used by this instance.
+     * @param executor          the Executor to use, or {@code null} if the default should be used.
+     * @param args              arguments which will passed to each {@link #newChild(Executor, Object...)} call
+     */
+    protected MultithreadEventExecutorGroup(int nThreads, Executor executor, Object... args) {
+        this(nThreads, executor, DefaultEventExecutorChooserFactory.INSTANCE, args);
+    }
+
+    /**
+     * Create a new instance.
+     *
+     * @param nThreads          the number of threads that will be used by this instance.
+     * @param executor          the Executor to use, or {@code null} if the default should be used.
+     * @param chooserFactory    the {@link EventExecutorChooserFactory} to use.
+     * @param args              arguments which will passed to each {@link #newChild(Executor, Object...)} call
+     */
+    protected MultithreadEventExecutorGroup(int nThreads, Executor executor,
+                                            EventExecutorChooserFactory chooserFactory, Object... args) {
+        if (nThreads <= 0) {
+            throw new IllegalArgumentException(String.format("nThreads: %d (expected: > 0)", nThreads));
+        }
+
+        if (executor == null) {
+            //如果空，创建任务线程执行器，newDefaultThreadFactory创建默认线程工厂--这样写的好处，线程创建和线程定义解耦。。。
+            /**
+             *public final class ThreadPerTaskExecutor implements Executor {
+             *    private final ThreadFactory threadFactory;
+             *    public ThreadPerTaskExecutor(ThreadFactory threadFactory) {
+             *        if (threadFactory == null) {
+             *            throw new NullPointerException("threadFactory");
+             *        }
+             *        this.threadFactory = threadFactory;
+             *    }
+             *    @Override
+             *    public void execute(Runnable command) {
+             *        threadFactory.newThread(command).start();
+             *    }
+             *}
+             --将任务扔给线程池,newDefaultThreadFactory在本类
+             */
+            executor = new ThreadPerTaskExecutor(newDefaultThreadFactory());
+        }
+
+        //此处生成线程执行组 --  private final EventExecutor[] children;
+        children = new EventExecutor[nThreads];
+
+        for (int i = 0; i < nThreads; i ++) {
+            boolean success = false;
+            try {
+                //通过newChild对数组赋值-executor是传入参数
+                children[i] = newChild(executor, args);
+                success = true;
+            } catch (Exception e) {
+                // TODO: Think about if this is a good exception type
+                throw new IllegalStateException("failed to create a child event loop", e);
+            } finally {
+                if (!success) {
+                    for (int j = 0; j < i; j ++) {
+                        children[j].shutdownGracefully();
+                    }
+
+                    for (int j = 0; j < i; j ++) {
+                        EventExecutor e = children[j];
+                        try {
+                            while (!e.isTerminated()) {
+                                e.awaitTermination(Integer.MAX_VALUE, TimeUnit.SECONDS);
+                            }
+                        } catch (InterruptedException interrupted) {
+                            // Let the caller handle the interruption.
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        chooser = chooserFactory.newChooser(children);
+
+        final FutureListener<Object> terminationListener = new FutureListener<Object>() {
+            @Override
+            public void operationComplete(Future<Object> future) throws Exception {
+                if (terminatedChildren.incrementAndGet() == children.length) {
+                    terminationFuture.setSuccess(null);
+                }
+            }
+        };
+
+        for (EventExecutor e: children) {
+            e.terminationFuture().addListener(terminationListener);
+        }
+
+        Set<EventExecutor> childrenSet = new LinkedHashSet<EventExecutor>(children.length);
+        Collections.addAll(childrenSet, children);
+        readonlyChildren = Collections.unmodifiableSet(childrenSet);
+    }
+
+     /**
+      * Create a new EventExecutor which will later then accessible via the {@link #next()}  method. This method will be called for each thread that will serve this {@link MultithreadEventExecutorGroup}.
+      * 创建一个新的EventExecutor，稍后可以通过{@link #next（）}方法访问它。将为将为此{@link MultithreadEventExecutorGroup}提供服务的每个线程调用此方法。
+      * 抽象方法--具体实现在子类实现
+      */
+     protected abstract EventExecutor newChild(Executor executor, Object... args) throws Exception;
+
+
+
+    ================DefaultThreadFactory
+    protected ThreadFactory newDefaultThreadFactory() {
+        return new DefaultThreadFactory(getClass());
+    }
+
+}
+
+
+=============================================DefaultThreadFactory==========================================================
+    /**
+     *具有简单命名规则的{@link ThreadFactory}实现。
+     */
+     public class DefaultThreadFactory implements ThreadFactory {
+
+         private static final AtomicInteger poolId = new AtomicInteger();
+
+         private final AtomicInteger nextId = new AtomicInteger();
+         private final String prefix;
+         private final boolean daemon;
+         private final int priority;
+         protected final ThreadGroup threadGroup;
+
+        //第二个线程是否后台(守护)线程,第三个参数，线程优先级
+         public DefaultThreadFactory(Class<?> poolType) {
+             this(poolType, false, Thread.NORM_PRIORITY);
+         }
+
+         public DefaultThreadFactory(Class<?> poolType, boolean daemon, int priority) {
+                 this(toPoolName(poolType), daemon, priority);
+             }
+
+
+         /**
+          * 最后一个参数，线程组
+          */
+         public DefaultThreadFactory(String poolName, boolean daemon, int priority) {
+                 this(poolName, daemon, priority, System.getSecurityManager() == null ?
+                         Thread.currentThread().getThreadGroup() : System.getSecurityManager().getThreadGroup());
+         }
+
+         public static String toPoolName(Class<?> poolType) {
+             if (poolType == null) {
+                 throw new NullPointerException("poolType");
+             }
+             ======================StringUtil======netty
+             String poolName = StringUtil.simpleClassName(poolType);
+             switch (poolName.length()) {
+                 case 0:
+                     return "unknown";
+                 case 1:
+                     return poolName.toLowerCase(Locale.US);
+                 default:
+                     if (Character.isUpperCase(poolName.charAt(0)) && Character.isLowerCase(poolName.charAt(1))) {
+                         return Character.toLowerCase(poolName.charAt(0)) + poolName.substring(1);
+                     } else {
+                         return poolName;
+                     }
+             }
+         }
+
+
+        public DefaultThreadFactory(String poolName, boolean daemon, int priority, ThreadGroup threadGroup) {
+                if (poolName == null) {
+                    throw new NullPointerException("poolName");
+                }
+                if (priority < Thread.MIN_PRIORITY || priority > Thread.MAX_PRIORITY) {
+                    throw new IllegalArgumentException(
+                            "priority: " + priority + " (expected: Thread.MIN_PRIORITY <= priority <= Thread.MAX_PRIORITY)");
+                }
+
+                prefix = poolName + '-' + poolId.incrementAndGet() + '-';
+                this.daemon = daemon;
+                this.priority = priority;
+                this.threadGroup = threadGroup;
+            }
+      。。。
+    }
+
+
+
+
+
+
+
+
+
+
+
+=============================================StringUtil--此处功能将类名小写，不重要==========================================================
+internal=不建议用户使用
+package io.netty.util.internal;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+import static io.netty.util.internal.ObjectUtil.*;
+
+/**
+ * String utility class.
+ */
+public final class StringUtil {
+
+    public static final String EMPTY_STRING = "";
+    public static final String NEWLINE = SystemPropertyUtil.get("line.separator", "\n");
+
+    public static final char DOUBLE_QUOTE = '\"';
+    public static final char COMMA = ',';
+    public static final char LINE_FEED = '\n';
+    public static final char CARRIAGE_RETURN = '\r';
+    public static final char TAB = '\t';
+    public static final char SPACE = 0x20;
+
+    private static final String[] BYTE2HEX_PAD = new String[256];
+    private static final String[] BYTE2HEX_NOPAD = new String[256];
+
+    /**
+     * 2 - Quote character at beginning and end.
+     * 5 - Extra allowance for anticipated escape characters that may be added.
+     */
+    private static final int CSV_NUMBER_ESCAPE_CHARACTERS = 2 + 5;
+    private static final char PACKAGE_SEPARATOR_CHAR = '.';
+
+    static {
+        // Generate the lookup table that converts a byte into a 2-digit hexadecimal integer.
+        // 生成将字节转换为2位十六进制整数的查找表。
+        for (int i = 0; i < BYTE2HEX_PAD.length; i++) {
+            String str = Integer.toHexString(i);
+            BYTE2HEX_PAD[i] = i > 0xf ? str : ('0' + str);
+            BYTE2HEX_NOPAD[i] = str;
+        }
+    }
+
+    private StringUtil() {
+        // Unused.
+    }
+
+
+
+
+    /**
+     * Generates a simplified name from a {@link Class}.  Similar to {@link Class#getSimpleName()}, but it works fine with anonymous classes.
+     * 从{@link Class}生成简化名称。与{@link Class＃getSimpleName（）}类似，但它适用于匿名类。
+     */
+    public static String simpleClassName(Class<?> clazz) {
+        String className = checkNotNull(clazz, "clazz").getName();
+        final int lastDotIdx = className.lastIndexOf(PACKAGE_SEPARATOR_CHAR);
+        if (lastDotIdx > -1) {
+            return className.substring(lastDotIdx + 1);
+        }
+        return className;
+    }
+    。。。
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
