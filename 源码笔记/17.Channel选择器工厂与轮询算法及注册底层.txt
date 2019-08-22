@@ -1,0 +1,229 @@
+
+==================================EventExecutorChooserFactory
+/**
+ * Factory that creates new {@link EventExecutorChooser}s.
+ */
+@UnstableApi
+public interface EventExecutorChooserFactory {
+  /**
+     * Returns a new {@link EventExecutorChooser}.
+     */
+    EventExecutorChooser newChooser(EventExecutor[] executors);
+
+    /**
+     * Chooses the next {@link EventExecutor} to use.
+     */
+    @UnstableApi
+    interface EventExecutorChooser {
+
+        /**
+         * Returns the new {@link EventExecutor} to use.
+         */
+        EventExecutor next();
+    }
+
+
+
+=========================================================DefaultEventExecutorChooserFactory
+/**
+ * Default implementation which uses simple round-robin to choose next {@link EventExecutor}.
+ * 默认实现，使用简单的循环法选择下一个{@link EventExecutor}。 */
+@UnstableApi
+public final class DefaultEventExecutorChooserFactory implements EventExecutorChooserFactory {
+
+    public static final DefaultEventExecutorChooserFactory INSTANCE = new DefaultEventExecutorChooserFactory();
+
+    private DefaultEventExecutorChooserFactory() { }
+
+    @SuppressWarnings("unchecked")
+    @Override
+    public EventExecutorChooser newChooser(EventExecutor[] executors) {
+        if (isPowerOfTwo(executors.length)) {
+            return new PowerOfTwoEventExecutorChooser(executors);
+        } else {
+            return new GenericEventExecutorChooser(executors);
+        }
+    }
+
+=================================================SingleThreadEventLoop
+
+/**
+ * Abstract base class for {@link EventLoop}s that execute all its submitted tasks in a single thread.
+* {@link EventLoop}的抽象基类，它在单个线程中执行所有提交的任务。 *
+ */
+public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor implements EventLoop {
+    @Override
+    public ChannelFuture register(Channel channel) {
+        return register(new DefaultChannelPromise(channel, this));
+    }
+
+
+/**
+ * Abstract base class for {@link OrderedEventExecutor}'s that execute all its submitted tasks in a single thread.
+* {@link OrderedEventExecutor}的抽象基类，它在单个线程中执行所有提交的任务。 *
+ */
+public abstract class SingleThreadEventExecutor extends AbstractScheduledEventExecutor implements OrderedEventExecutor {
+
+    static final int DEFAULT_MAX_PENDING_EXECUTOR_TASKS = Math.max(16,
+            SystemPropertyUtil.getInt("io.netty.eventexecutor.maxPendingTasks", Integer.MAX_VALUE));
+
+    private static final InternalLogger logger =
+            InternalLoggerFactory.getInstance(SingleThreadEventExecutor.class);
+
+    private static final int ST_NOT_STARTED = 1;
+    private static final int ST_STARTED = 2;
+    private static final int ST_SHUTTING_DOWN = 3;
+    private static final int ST_SHUTDOWN = 4;
+    private static final int ST_TERMINATED = 5;
+
+    private static final Runnable WAKEUP_TASK = new Runnable() {
+        @Override
+        public void run() {
+            // Do nothing.
+        }
+    };
+    private static final Runnable NOOP_TASK = new Runnable() {
+        @Override
+        public void run() {
+            // Do nothing.
+        }
+    };
+
+    private static final AtomicIntegerFieldUpdater<SingleThreadEventExecutor> STATE_UPDATER =
+            AtomicIntegerFieldUpdater.newUpdater(SingleThreadEventExecutor.class, "state");
+    private static final AtomicReferenceFieldUpdater<SingleThreadEventExecutor, ThreadProperties> PROPERTIES_UPDATER =
+            AtomicReferenceFieldUpdater.newUpdater(
+                    SingleThreadEventExecutor.class, ThreadProperties.class, "threadProperties");
+
+    private final Queue<Runnable> taskQueue;
+
+    //此处单线程执行
+    private volatile Thread thread;
+    @SuppressWarnings("unused")
+    private volatile ThreadProperties threadProperties;
+    private final Executor executor;
+    private volatile boolean interrupted;
+
+    private final Semaphore threadLock = new Semaphore(0);
+    private final Set<Runnable> shutdownHooks = new LinkedHashSet<Runnable>();
+    private final boolean addTaskWakesUp;
+    private final int maxPendingTasks;
+    private final RejectedExecutionHandler rejectedExecutionHandler;
+
+    private long lastExecutionTime;
+
+    @SuppressWarnings({ "FieldMayBeFinal", "unused" })
+    private volatile int state = ST_NOT_STARTED;
+
+    private volatile long gracefulShutdownQuietPeriod;
+    private volatile long gracefulShutdownTimeout;
+    private long gracefulShutdownStartTime;
+
+    private final Promise<?> terminationFuture = new DefaultPromise<Void>(GlobalEventExecutor.INSTANCE);
+
+
+        @Override
+        public ChannelFuture register(Channel channel) {
+            return register(new DefaultChannelPromise(channel, this));
+        }
+
+
+    @Override
+    public ChannelFuture register(final ChannelPromise promise) {
+        ObjectUtil.checkNotNull(promise, "promise");
+        promise.channel().unsafe().register(this, promise);
+        return promise;
+    }
+
+
+
+
+====================================DefaultChannelPromise==============
+/**
+ * The default {@link ChannelPromise} implementation.  It is recommended to use {@link Channel#newPromise()} to create a new {@link ChannelPromise} rather than calling the constructor explicitly.
+ *默认的{@link ChannelPromise}实现。建议使用{@link Channel＃newPromise（）}创建新的{@link ChannelPromise}，而不是显式调用构造函数。
+ */
+public class DefaultChannelPromise extends DefaultPromise<Void> implements ChannelPromise, FlushCheckpoint {
+
+    private final Channel channel;
+    private long checkpoint;
+
+    /**
+     * Creates a new instance.
+     *
+     * @param channel
+     *        the {@link Channel} associated with this future
+     */
+    public DefaultChannelPromise(Channel channel) {
+        this.channel = checkNotNull(channel, "channel");
+    }
+
+    /**
+     * Creates a new instance.
+     *
+     * @param channel
+     *        the {@link Channel} associated with this future
+     */
+    public DefaultChannelPromise(Channel channel, EventExecutor executor) {
+        super(executor);
+        this.channel = checkNotNull(channel, "channel");
+    }
+
+
+
+
+
+
+
+
+=========================================DefaultPromise
+public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(DefaultPromise.class);
+    private static final InternalLogger rejectedExecutionLogger =
+            InternalLoggerFactory.getInstance(DefaultPromise.class.getName() + ".rejectedExecution");
+    private static final int MAX_LISTENER_STACK_DEPTH = Math.min(8,
+            SystemPropertyUtil.getInt("io.netty.defaultPromise.maxListenerStackDepth", 8));
+    @SuppressWarnings("rawtypes")
+    private static final AtomicReferenceFieldUpdater<DefaultPromise, Object> RESULT_UPDATER =
+            AtomicReferenceFieldUpdater.newUpdater(DefaultPromise.class, Object.class, "result");
+    private static final Object SUCCESS = new Object();
+    private static final Object UNCANCELLABLE = new Object();
+    private static final CauseHolder CANCELLATION_CAUSE_HOLDER = new CauseHolder(ThrowableUtil.unknownStackTrace(
+            new CancellationException(), DefaultPromise.class, "cancel(...)"));
+
+    private volatile Object result;
+    private final EventExecutor executor;
+    /**
+     * One or more listeners. Can be a {@link GenericFutureListener} or a {@link DefaultFutureListeners}.
+     * If {@code null}, it means either 1) no listeners were added yet or 2) all listeners were notified.
+     *
+     * Threading - synchronized(this). We must support adding listeners when there is no EventExecutor.
+     */
+    private Object listeners;
+    /**
+     * Threading - synchronized(this). We are required to hold the monitor to use Java's underlying wait()/notifyAll().
+     */
+    private short waiters;
+
+    /**
+     * Threading - synchronized(this). We must prevent concurrent notification and FIFO listener notification if the
+     * executor changes.
+     */
+    private boolean notifyingListeners;
+
+
+    /**
+     * Creates a new instance.
+     *
+     * It is preferable to use {@link EventExecutor#newPromise()} to create a new promise
+     *
+     * @param executor
+     *        the {@link EventExecutor} which is used to notify the promise once it is complete.
+     *        It is assumed this executor will protect against {@link StackOverflowError} exceptions.
+     *        The executor may be used to avoid {@link StackOverflowError} by executing a {@link Runnable} if the stack
+     *        depth exceeds a threshold.
+     *
+     */
+    public DefaultPromise(EventExecutor executor) {
+        this.executor = checkNotNull(executor, "executor");
+    }

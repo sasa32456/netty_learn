@@ -1,0 +1,343 @@
+===================================================Channel================================================
+/**
+*网络套接字或能够执行I / O操作（如读取，写入，连接和绑定）的组件的连接。
+ * <p>
+ *频道为用户提供：
+ * <ul>
+ * <li>频道的当前状态（例如，它是否已打开？是否已连接？），</ li>
+ * <li>频道的{@linkplain ChannelConfig配置参数}（例如接收缓冲区大小），</ li>
+ * <li>通道支持的I / O操作（例如读取，写入，连接和绑定），以及处理与通道关联的所有I / O事件和请求的{@link ChannelPipeline}。</ li>
+ * </ ul>
+ *
+ * <h3>所有I / O操作都是异步的。</ h3>
+ * <p>
+ * Netty中的所有I / O操作都是异步的。这意味着任何I / O调用都将立即返回，并且不保证在调用结束时所请求的I / O操作已完成。
+ 相反，您将返回一个{@link ChannelFuture}实例，该实例将在请求的I / O操作成功，失败或取消时通知您。
+ *
+ * <h3>频道是分层的</ h3>
+ * <p>
+ * {@link Channel}可以拥有{@linkplain #parent（）父}，具体取决于它的创建方式。例如，{@link ServerSocketChannel}接受的{@link SocketChannel}
+ 将在{@link #parent（）}上返回{@link ServerSocketChannel}作为其父级。
+ * <p>
+ *层次结构的语义取决于{@link Channel}所属的传输实现。例如，您可以编写一个新的{@link Channel}实现，创建共享一个套接字连接的子通道，
+ 如<a href="http://beepcore.org/"> BEEP </a>和<a href =“http://en.wikipedia.org/wiki/Secure_Shell”> SSH </a>。
+ *
+ * <h3> Downcast以访问特定于传输的操作</ h3>
+ * <p>
+ *某些传输会暴露特定于传输的其他操作。将{@link Channel}下传到子类型以调用此类操作。例如，使用旧的I / O数据报传输，组播加入/离开操作由{@link DatagramChannel}提供。
+ *
+ * <h3>发布资源</ h3>
+ * <p>
+ *完成{@link Channel}后，调用{@link #close（）}或{@link #close（ChannelPromise）}释放所有资源非常重要。这确保以适当的方式释放所有资源，即文件句柄。
+ * /
+public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparable<Channel> {
+
+ / **
+     *返回此{@link Channel}的全局唯一标识符。
+     * /
+    ChannelId id();
+
+/ **
+     *返回此{@link Channel}注册的{@link EventLoop}。
+     * /
+    EventLoop eventLoop();
+
+/ **
+     *返回此频道的父节点。
+     *
+     * @return父频道。
+     * {@code null}如果此频道没有父频道。
+     * /
+    Channel parent();
+
+/ **
+     *返回此频道的配置。
+     * /
+    ChannelConfig config();
+
+ / **
+     *如果{@link Channel}已打开，则返回{@code true}，稍后可能会生效
+     * /
+    boolean isOpen();
+
+   / **
+     *如果{@link Channel}注册了{@link EventLoop}，则返回{@code true}。
+     * /
+    boolean isRegistered();
+
+    / **
+     *如果{@link频道}处于活动状态且已连接，则返回{@code true}。
+     * /
+    boolean isActive();
+
+    /**
+     *返回{@link Channel}的{@link ChannelMetadata}，它描述了{@link Channel}的性质。
+     * /
+    ChannelMetadata metadata();
+
+    /**
+*返回此通道绑定的本地地址。返回的{@link SocketAddress}应该被转换为更具体的类型，例如{@link InetSocketAddress}以检索详细信息。
+     *
+     * @return the local address of this channel.
+     *         {@code null} if this channel is not bound.
+     */
+    SocketAddress localAddress();
+
+    /**
+ *返回此通道所连接的远程地址。返回的{@link SocketAddress}应该被转换为更具体的类型，例如{@link InetSocketAddress}以检索详细信息。
+     *
+* @return此频道的远程地址。 {@code null}如果此频道未连接。如果此通道未连接但可以从任意远程地址接收消息（例如{@link DatagramChannel}，
+请使用{@link DatagramPacket #actainer（）}确定接收消息的来源，因为此方法将返回{@code null }。
+     * /
+    SocketAddress remoteAddress();
+
+    /**
+   *返回{@link ChannelFuture}，该频道关闭时会通知{@link ChannelFuture}。此方法始终返回相同的future实例。
+     * /
+    ChannelFuture closeFuture();
+
+    /**
+    *当且仅当I / O线程立即执行请求的写操作时，返回{@code true}。此方法返回{@code false}时发出的任何写入请求都会排队，直到I / O线程准备好处理排队的写入请求为止。
+     * /
+    boolean isWritable();
+
+    /**
+  *获取在{@link #isWritable（）}返回{@code false}之前可写入的字节数。此数量将始终为非负数。如果{@link #isWritable（）}是{@code false}则为0。
+     * /
+    long bytesBeforeUnwritable();
+
+    /**
+     *获取必须从底层缓冲区中排出多少字节，直到{@link #isWritable（）}返回{@code true}为止。此数量将始终为非负数。如果{@link #isWritable（）}是{@code true}则为0。
+     * /
+    long bytesBeforeWritable();
+
+    /**
+   *返回提供不安全操作的<em>仅供内部使用的</ em>对象。
+     * /
+    Unsafe unsafe();
+
+    /**
+    *返回指定的{@link ChannelPipeline}。
+     * /
+    ChannelPipeline pipeline();
+
+    /**
+     *返回分配的{@link ByteBufAllocator}，用于分配{@link ByteBuf}。
+     * /
+    ByteBufAllocator alloc();
+
+    @Override
+    Channel read();
+
+    @Override
+    Channel flush();
+
+    /**
+   * <em>不安全的</ em>操作，应该<em>永远不会从用户代码中调用</ em>。这些方法仅用于实现实际传输，必须从I / O线程调用，但以下方法除外：
+     * <ul>
+     *   <li>{@link #localAddress()}</li>
+     *   <li>{@link #remoteAddress()}</li>
+     *   <li>{@link #closeForcibly()}</li>
+     *   <li>{@link #register(EventLoop, ChannelPromise)}</li>
+     *   <li>{@link #deregister(ChannelPromise)}</li>
+     *   <li>{@link #voidPromise()}</li>
+     * </ul>
+     */
+    interface Unsafe {
+
+        /**
+        *返回指定的{@link RecvByteBufAllocator.Handle}，用于在接收数据时分配{@link ByteBuf}。
+         * /
+        RecvByteBufAllocator.Handle recvBufAllocHandle();
+
+        /**
+        *返回绑定到本地的{@link SocketAddress}或如果没有则返回{@code null}。
+         * /
+        SocketAddress localAddress();
+
+        /**
+         *返回绑定远程的{@link SocketAddress}或{@code null}如果尚未绑定。
+         * /
+        SocketAddress remoteAddress();
+
+       / **
+         *注册{@link ChannelPromise}的{@link频道}，并在注册完成后通知{@link ChannelFuture}。
+         * /
+        void register(EventLoop eventLoop, ChannelPromise promise);
+
+       / **
+         *将{@link SocketAddress}绑定到{@link ChannelPromise}的{@link Channel}，并在完成后通知它。
+         * /
+        void bind(SocketAddress localAddress, ChannelPromise promise);
+
+       / **
+         *将给定{@link ChannelFuture}的{@link Channel}与给定的远程{@link SocketAddress}连接。如果应该使用特定的本地{@link SocketAddress}，则需要将其作为参数给出。否则只需将{@code null}传递给它。
+         *
+         *一旦连接操作完成，{@link ChannelPromise}将收到通知。
+         * /
+        void connect(SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise);
+
+        / **
+         *断开{@link ChannelFuture}的{@link频道}，并在操作完成后通知{@link ChannelPromise}。
+         * /
+        void disconnect(ChannelPromise promise);
+
+        /**
+         *关闭{@link ChannelPromise}的{@link Channel}，并在操作完成后通知{@link ChannelPromise}。
+         * /
+        void close(ChannelPromise promise);
+
+        /**
+         * Closes the {@link Channel} immediately without firing any events.  Probably only useful when registration attempt failed.
+         */
+        void closeForcibly();
+
+        /**
+         *从{@link EventLoop}取消注册{@link ChannelPromise}的{@link Channel}，并在操作完成后通知{@link ChannelPromise}。
+         * /
+        void deregister(ChannelPromise promise);
+
+        /**
+         *计划一个读取操作，该操作填充{@link ChannelPipeline}中第一个{@link ChannelInboundHandler}的入站缓冲区。如果已经有挂起的读操作，则此方法不执行任何操作。
+         * /
+        void beginRead();
+
+        /**
+         * 安排写操作。
+         */
+        void write(Object msg, ChannelPromise promise);
+
+        /**
+        *清除通过{@link #write（Object，ChannelPromise）}安排的所有写操作。
+         * /
+        void flush();
+
+        /**
+ *返回一个特殊的ChannelPromise，可以重复使用并传递给{@link Unsafe}中的操作。它永远不会被告知成功或错误，因此只是以{@link ChannelPromise}作为参数但不希望得到通知的操作的占位符。
+         * /
+        ChannelPromise voidPromise();
+
+        /**
+        *返回存储挂起写请求的{@link Channel}的{@link ChannelOutboundBuffer}。
+         * /
+        ChannelOutboundBuffer outboundBuffer();
+    }
+}
+================================================AbstractBootstrap====================================
+
+
+    final ChannelFuture initAndRegister() {
+        Channel channel = null;
+        try {
+            channel = channelFactory.newChannel();
+            init(channel);
+        } catch (Throwable t) {
+            if (channel != null) {
+                // channel can be null if newChannel crashed (eg SocketException("too many open files"))
+                channel.unsafe().closeForcibly();
+                // as the Channel is not registered yet we need to force the usage of the GlobalEventExecutor
+                return new DefaultChannelPromise(channel, GlobalEventExecutor.INSTANCE).setFailure(t);
+            }
+            // as the Channel is not registered yet we need to force the usage of the GlobalEventExecutor
+            return new DefaultChannelPromise(new FailedChannel(), GlobalEventExecutor.INSTANCE).setFailure(t);
+        }
+
+        ChannelFuture regFuture = config().group().register(channel);
+        if (regFuture.cause() != null) {
+            if (channel.isRegistered()) {
+                channel.close();
+            } else {
+                channel.unsafe().closeForcibly();
+            }
+        }
+
+        // If we are here and the promise is not failed, it's one of the following cases:
+        // 1) If we attempted registration from the event loop, the registration has been completed at this point.
+        //    i.e. It's safe to attempt bind() or connect() now because the channel has been registered.
+        // 2) If we attempted registration from the other thread, the registration request has been successfully
+        //    added to the event loop's task queue for later execution.
+        //    i.e. It's safe to attempt bind() or connect() now:
+        //         because bind() or connect() will be executed *after* the scheduled registration task is executed
+        //         because register(), bind(), and connect() are all bound to the same thread.
+        //如果我们在这里并且承诺未失败，则是以下情况之一：
+        // 1）如果我们尝试从事件循环进行注册，则此时已完成注册。
+        //即现在尝试bind（）或connect（）是安全的，因为频道已经注册。
+        // 2）如果我们尝试从另一个线程注册，则注册请求已成功
+        //添加到事件循环的任务队列中以供稍后执行。
+        //即现在尝试bind（）或connect（）是安全的：
+        //因为在执行预定的注册任务之后将执行bind（）或connect（）*
+        //因为register（），bind（）和connect（）都绑定到同一个线程。
+
+        return regFuture;
+    }
+
+===================================================AbstractBootstrap============================
+
+ @Override
+    void init(Channel channel) throws Exception {
+        final Map<ChannelOption<?>, Object> options = options0();
+        synchronized (options) {
+            setChannelOptions(channel, options, logger);
+        }
+
+        final Map<AttributeKey<?>, Object> attrs = attrs0();
+        synchronized (attrs) {
+            for (Entry<AttributeKey<?>, Object> e: attrs.entrySet()) {
+                @SuppressWarnings("unchecked")
+                AttributeKey<Object> key = (AttributeKey<Object>) e.getKey();
+                channel.attr(key).set(e.getValue());
+            }
+        }
+        //pipeline在父类创建时创建
+        ChannelPipeline p = channel.pipeline();
+
+        final EventLoopGroup currentChildGroup = childGroup;
+        final ChannelHandler currentChildHandler = childHandler;
+        final Entry<ChannelOption<?>, Object>[] currentChildOptions;
+        final Entry<AttributeKey<?>, Object>[] currentChildAttrs;
+        synchronized (childOptions) {
+            currentChildOptions = childOptions.entrySet().toArray(newOptionArray(0));
+        }
+        synchronized (childAttrs) {
+            currentChildAttrs = childAttrs.entrySet().toArray(newAttrArray(0));
+        }
+
+        p.addLast(new ChannelInitializer<Channel>() {
+            @Override
+            public void initChannel(final Channel ch) throws Exception {
+                final ChannelPipeline pipeline = ch.pipeline();
+                ChannelHandler handler = config.handler();
+                if (handler != null) {
+                    pipeline.addLast(handler);
+                }
+
+                ch.eventLoop().execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        pipeline.addLast(new ServerBootstrapAcceptor(
+                                ch, currentChildGroup, currentChildHandler, currentChildOptions, currentChildAttrs));
+                    }
+                });
+            }
+        });
+    }
+
+====================================================AbstractChannel
+/**
+ * A skeletal {@link Channel} implementation.
+ */
+public abstract class AbstractChannel extends DefaultAttributeMap implements Channel {
+
+
+/**
+     * Creates a new instance.
+     *
+     * @param parent
+     *        the parent of this channel. {@code null} if there's no parent.
+     */
+    protected AbstractChannel(Channel parent) {
+        this.parent = parent;
+        id = newId();
+        unsafe = newUnsafe();
+        pipeline = newChannelPipeline();
+    }

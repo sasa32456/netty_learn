@@ -1,0 +1,225 @@
+public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparable<Channel> {
+public interface AttributeMap {
+public class NioServerSocketChannel extends AbstractNioMessageChannel
+                             implements io.netty.channel.socket.ServerSocketChannel {
+ private final ServerSocketChannelConfig config;
+
+
+4.1以后ChannelHandlerContext.attr(...)==Channel.attr(...)
+
+
+=======================================DefaultChannelPipeline==========================================
+
+ /**
+     * Set to {@code true} once the {@link AbstractChannel} is registered.Once set to {@code true} the value will never change.
+     */
+    private boolean registered;
+
+
+ @Override
+    public final ChannelPipeline addLast(EventExecutorGroup group, String name, ChannelHandler handler) {
+        final AbstractChannelHandlerContext newCtx;
+        synchronized (this) {
+            checkMultiplicity(handler);
+
+            newCtx = newContext(group, filterName(name, handler), handler);
+
+            addLast0(newCtx);
+
+            // If the registered is false it means that the channel was not registered on an eventLoop yet.
+            // In this case we add the context to the pipeline and add a task that will call
+            // ChannelHandler.handlerAdded(...) once the channel is registered.
+            //如果注册为false，则表示该频道尚未在eventLoop上注册。
+            //在这种情况下，我们将上下文添加到管道并添加将调用的任务
+            //一旦注册了频道，就会收到ChannelHandler.handlerAdded（...）。
+            if (!registered) {
+                newCtx.setAddPending();
+                callHandlerCallbackLater(newCtx, true);
+                return this;
+            }
+
+            EventExecutor executor = newCtx.executor();
+            if (!executor.inEventLoop()) {
+                callHandlerAddedInEventLoop(newCtx, executor);
+                return this;
+            }
+        }
+        callHandlerAdded0(newCtx);
+        return this;
+    }
+
+
+ private void callHandlerAdded0(final AbstractChannelHandlerContext ctx) {
+        try {
+            ctx.callHandlerAdded();
+        } catch (Throwable t) {
+            boolean removed = false;
+            try {
+                remove0(ctx);
+                ctx.callHandlerRemoved();
+                removed = true;
+            } catch (Throwable t2) {
+                if (logger.isWarnEnabled()) {
+                    logger.warn("Failed to remove a handler: " + ctx.name(), t2);
+                }
+            }
+
+            if (removed) {
+                fireExceptionCaught(new ChannelPipelineException(
+                        ctx.handler().getClass().getName() +
+                        ".handlerAdded() has thrown an exception; removed.", t));
+            } else {
+                fireExceptionCaught(new ChannelPipelineException(
+                        ctx.handler().getClass().getName() +
+                        ".handlerAdded() has thrown an exception; also failed to remove.", t));
+            }
+        }
+    }
+
+ private void callHandlerCallbackLater(AbstractChannelHandlerContext ctx, boolean added) {
+        assert !registered;
+
+        PendingHandlerCallback task = added ? new PendingHandlerAddedTask(ctx) : new PendingHandlerRemovedTask(ctx);
+        PendingHandlerCallback pending = pendingHandlerCallbackHead;
+        if (pending == null) {
+            pendingHandlerCallbackHead = task;
+        } else {
+            // Find the tail of the linked-list.
+            while (pending.next != null) {
+                pending = pending.next;
+            }
+            pending.next = task;
+        }
+    }
+
+ private final class PendingHandlerAddedTask extends PendingHandlerCallback {
+
+         PendingHandlerAddedTask(AbstractChannelHandlerContext ctx) {
+             super(ctx);
+         }
+
+         @Override
+         public void run() {
+             callHandlerAdded0(ctx);
+         }
+
+         @Override
+         void execute() {
+             EventExecutor executor = ctx.executor();
+             if (executor.inEventLoop()) {
+                 callHandlerAdded0(ctx);
+             } else {
+                 try {
+                     executor.execute(this);
+                 } catch (RejectedExecutionException e) {
+                     if (logger.isWarnEnabled()) {
+                         logger.warn(
+                                 "Can't invoke handlerAdded() as the EventExecutor {} rejected it, removing handler {}.",
+                                 executor, ctx.name(), e);
+                     }
+                     remove0(ctx);
+                     ctx.setRemoved();
+                 }
+             }
+         }
+     }
+
+    private abstract static class PendingHandlerCallback implements Runnable {
+        final AbstractChannelHandlerContext ctx;
+        PendingHandlerCallback next;
+
+        PendingHandlerCallback(AbstractChannelHandlerContext ctx) {
+            this.ctx = ctx;
+        }
+
+        abstract void execute();
+    }
+
+    private void callHandlerAdded0(final AbstractChannelHandlerContext ctx) {
+        try {
+            ctx.callHandlerAdded();
+        } catch (Throwable t) {
+            boolean removed = false;
+            try {
+                remove0(ctx);
+                ctx.callHandlerRemoved();
+                removed = true;
+            } catch (Throwable t2) {
+                if (logger.isWarnEnabled()) {
+                    logger.warn("Failed to remove a handler: " + ctx.name(), t2);
+                }
+            }
+
+            if (removed) {
+                fireExceptionCaught(new ChannelPipelineException(
+                        ctx.handler().getClass().getName() +
+                        ".handlerAdded() has thrown an exception; removed.", t));
+            } else {
+                fireExceptionCaught(new ChannelPipelineException(
+                        ctx.handler().getClass().getName() +
+                        ".handlerAdded() has thrown an exception; also failed to remove.", t));
+            }
+        }
+    }
+=================================================NioServerSocketChannel==================
+======================================AbstractNioMessageChannel
+================================AbstractNioChannel
+===============================AbstractChannel
+============================DefaultAttributeMap
+  @SuppressWarnings("unchecked")
+    @Override
+    public <T> Attribute<T> attr(AttributeKey<T> key) {
+        if (key == null) {
+            throw new NullPointerException("key");
+        }
+        AtomicReferenceArray<DefaultAttribute<?>> attributes = this.attributes;
+        if (attributes == null) {
+            // Not using ConcurrentHashMap due to high memory consumption.
+            attributes = new AtomicReferenceArray<DefaultAttribute<?>>(BUCKET_SIZE);
+
+            if (!updater.compareAndSet(this, null, attributes)) {
+                attributes = this.attributes;
+            }
+        }
+
+        int i = index(key);
+        DefaultAttribute<?> head = attributes.get(i);
+        if (head == null) {
+            // No head exists yet which means we may be able to add the attribute without synchronization and just
+            // use compare and set. At worst we need to fallback to synchronization and waste two allocations.
+            head = new DefaultAttribute();
+            DefaultAttribute<T> attr = new DefaultAttribute<T>(head, key);
+            head.next = attr;
+            attr.prev = head;
+            if (attributes.compareAndSet(i, null, head)) {
+                // we were able to add it so return the attr right away
+                return attr;
+            } else {
+                head = attributes.get(i);
+            }
+        }
+
+        synchronized (head) {
+            DefaultAttribute<?> curr = head;
+            for (;;) {
+                DefaultAttribute<?> next = curr.next;
+                if (next == null) {
+                    DefaultAttribute<T> attr = new DefaultAttribute<T>(head, key);
+                    curr.next = attr;
+                    attr.prev = curr;
+                    return attr;
+                }
+
+                if (next.key == key && !next.removed) {
+                    return (Attribute<T>) next;
+                }
+                curr = next;
+            }
+        }
+    }
+=======================================AbstractChannelHandlerContext
+    @Override
+    public <T> Attribute<T> attr(AttributeKey<T> key) {
+        //转给Channel实现
+        return channel().attr(key);
+    }

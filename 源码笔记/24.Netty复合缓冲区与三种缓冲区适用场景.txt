@@ -1,0 +1,204 @@
+Netty ByteBuf所提供的三种缓冲区：BytebufTest2
+
+1.heap buffer
+2.direct buffer
+3.composite buffer 复合缓冲区
+
+
+/**
+ *一个虚拟缓冲区，它将多个缓冲区显示为单个合并缓冲区。建议使用{@link ByteBufAllocator＃compositeBuffer（）}
+ 或{@link Unpooled＃wrappedBuffer（ByteBuf ...）}，而不是显式调用构造函数。
+ */
+public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements Iterable<ByteBuf> {
+
+
+Heap Buffer(堆缓冲区)
+
+这是最常用的类型，ByteBuf将数据存储到JVM的堆空间中，并且将实际的数据存放到byte array中来实现
+
+优点：由于存储在JVM的堆中，因此可以快速的创建与快速的释放，并且它提供了直接访问内部字节数组的方法。
+缺点：每次读写数据时，都先要将数据复制到直接缓冲区再次进行网络传输。
+
+Direct Buffer(直接缓冲区)
+
+在堆之外直接分配内存空间，直接缓冲区并不会占用堆的容量空间，因为它是由操作系统在本地内存进行的数据分配。
+
+优点：在使用Socket进行数据传递时，性能非常好，因为数据直接于操作系统本地内存，所以不需要从JVM将数据复制到直接缓冲区中，性能很好。
+缺点：因为Direct Buffer是直接在操作系统内存中，所以内存空间的分配与释放要比堆空间更加复杂，而且速度要慢一些。
+
+Netty通过提供内存池来解决这个问题。直接缓冲区并不支持通过字节数组的方式来访问数据
+
+重点：对于后端的业务消息的编解码来说，推荐使用HeapByteBuf；对于I/O通信线程在读写缓冲区时，推荐使用DirectByteBuf。
+
+Composite Buffer(复合缓冲区)
+将缓冲区复合为一致视图：从而控制访问
+
+JDK的ByteBuffer与Netty的ByteBuf之间的差异对比
+
+1.Netty的ByteBuf才用了读写索引分离的策略（readIndex与writeIndex），一个初始化（里面尚未有任何数据）的ByteBuf的readIndex与writeIndex值都为0
+2.当读索引与索引处于同一个位置，如果我们继续取，那么就会抛出IndexOutOfBoundsException。
+3.对于ByteBuf的任何读写操作都会分别的单独维护读索引和写索引。maxCapacity最大容量默认的限制是Integer.MAX_VALUE。
+
+
+
+/**
+ * A byte buffer.
+ *
+ * <p> This class defines six categories of operations upon byte buffers:
+ *
+ * <ul>
+ *
+ *   <li><p> Absolute and relative {@link #get() <i>get</i>} and   {@link #put(byte) <i>put</i>} methods that read and write   single bytes; </p></li>
+ *
+ *   <li><p> Relative {@link #get(byte[]) <i>bulk get</i>}   methods that transfer contiguous sequences of bytes from this buffer   into an array; </p></li>
+ *
+ *   <li><p> Relative {@link #put(byte[]) <i>bulk put</i>}   methods that transfer contiguous sequences of bytes from a   byte array or some other byte   buffer into this buffer; </p></li>
+
+ *   <li><p> Absolute and relative {@link #getChar() <i>get</i>}   and {@link #putChar(char) <i>put</i>} methods that read and   write values of other primitive types, translating them to and from   sequences of bytes in a particular byte order; </p></li>
+ *
+ *   <li><p> Methods for creating <i><a href="#views">view buffers</a></i>,   which allow a byte buffer to be viewed as a buffer containing values of   some other primitive type; and </p></li>
+
+ *   <li><p> Methods for {@link #compact compacting}, {@link   #duplicate duplicating}, and {@link #slice slicing}   a byte buffer.  </p></li>
+ *
+ * </ul>
+ *
+ * <p> Byte buffers can be created either by {@link #allocate
+ * <i>allocation</i>}, which allocates space for the buffer's
+
+ * content, or by {@link #wrap(byte[]) <i>wrapping</i>} an existing byte array  into a buffer.
+
+ * <a name="direct"></a>
+ * <h2> Direct <i>vs.</i> non-direct buffers </h2>
+ *
+ * <p> A byte buffer is either <i>direct</i> or <i>non-direct</i>.  Given a direct byte buffer, the Java virtual machine will make a best effort to perform native I/O operations directly upon it.  That is, it will attempt to avoid copying the buffer's content to (or from) an intermediate buffer before (or after) each invocation of one of the underlying operating system's native I/O operations.
+ *
+ * <p> A direct byte buffer may be created by invoking the {@link #allocateDirect(int) allocateDirect} factory method of this class.  The buffers returned by this method typically have somewhat higher allocation and deallocation costs than non-direct buffers.  The contents of direct buffers may reside outside of the normal garbage-collected heap, and so their impact upon the memory footprint of an application might not be obvious.  It is therefore recommended that direct buffers be allocated primarily for large, long-lived buffers that are subject to the underlying system's native I/O operations.  In general it is best to allocate direct buffers only when they yield a measureable gain in program performance.
+ *
+ * <p> A direct byte buffer may also be created by {@link java.nio.channels.FileChannel#map mapping} a region of a file directly into memory.  An implementation of the Java platform may optionally support the creation of direct byte buffers from native code via JNI.  If an instance of one of these kinds of buffers refers to an inaccessible region of memory then an attempt to access that region will not change the buffer's content and will cause an unspecified exception to be thrown either at the time of the access or at some later time.
+ * <p> Whether a byte buffer is direct or non-direct may be determined by invoking its {@link #isDirect isDirect} method.  This method is provided so that explicit buffer management can be done in performance-critical code.
+
+ * <a name="bin"></a>
+ * <h2> Access to binary data </h2>
+ *
+ * <p> This class defines methods for reading and writing values of all other primitive types, except <tt>boolean</tt>.  Primitive values are translated to (or from) sequences of bytes according to the buffer's current byte order, which may be retrieved and modified via the {@link #order order} methods.  Specific byte orders are represented by instances of the {@link ByteOrder} class.  The initial order of a byte buffer is always {@link ByteOrder#BIG_ENDIAN BIG_ENDIAN}.
+ *
+ * <p> For access to heterogeneous binary data, that is, sequences of values of different types, this class defines a family of absolute and relative <i>get</i> and <i>put</i> methods for each type.  For 32-bit floating-point values, for example, this class defines:
+ *
+ * <blockquote><pre>
+ * float  {@link #getFloat()}
+ * float  {@link #getFloat(int) getFloat(int index)}
+ *  void  {@link #putFloat(float) putFloat(float f)}
+ *  void  {@link #putFloat(int,float) putFloat(int index, float f)}</pre></blockquote>
+ *
+ * <p> Corresponding methods are defined for the types <tt>char</tt>, <tt>short</tt>, <tt>int</tt>, <tt>long</tt>, and <tt>double</tt>.  The index parameters of the absolute <i>get</i> and <i>put</i> methods are in terms of bytes rather than of the type being read or written.
+ *
+ * <a name="views"></a>
+ *
+ * <p> For access to homogeneous binary data, that is, sequences of values of the same type, this class defines methods that can create <i>views</i> of a given byte buffer.  A <i>view buffer</i> is simply another buffer whose content is backed by the byte buffer.  Changes to the byte buffer's content will be visible in the view buffer, and vice versa; the two buffers' position, limit, and mark values are independent.  The {@link #asFloatBuffer() asFloatBuffer} method, for example, creates an instance of the {@link FloatBuffer} class that is backed by the byte buffer upon which the method is invoked.  Corresponding view-creation methods are defined for the types <tt>char</tt>, <tt>short</tt>, <tt>int</tt>, <tt>long</tt>, and <tt>double</tt>.
+ *
+ * <p> View buffers have three important advantages over the families of type-specific <i>get</i> and <i>put</i> methods described above:
+ *
+ * <ul>
+ *
+ *   <li><p> A view buffer is indexed not in terms of bytes but rather in terms   of the type-specific size of its values;  </p></li>
+ *
+ *   <li><p> A view buffer provides relative bulk <i>get</i> and <i>put</i>   methods that can transfer contiguous sequences of values between a buffer   and an array or some other buffer of the same type; and  </p></li>
+ *
+ *   <li><p> A view buffer is potentially much more efficient because it will   be direct if, and only if, its backing byte buffer is direct.  </p></li>
+ *
+ * </ul>
+ * <p> The byte order of a view buffer is fixed to be that of its byte buffer at the time that the view is created.  </p>
+ *
+ * <h2> Invocation chaining </h2>
+
+ * <p> Methods in this class that do not otherwise have a value to return are specified to return the buffer upon which they are invoked.  This allows method invocations to be chained.
+
+ * The sequence of statements
+ *
+ * <blockquote><pre>
+ * bb.putInt(0xCAFEBABE);
+ * bb.putShort(3);
+ * bb.putShort(45);</pre></blockquote>
+ *
+ * can, for example, be replaced by the single statement
+ *
+ * <blockquote><pre>
+ * bb.putInt(0xCAFEBABE).putShort(3).putShort(45);</pre></blockquote>
+ *
+ * @author Mark Reinhold
+ * @author JSR-51 Expert Group
+ * @since 1.4
+ */
+
+public abstract class ByteBuffer
+    extends Buffer
+    implements Comparable<ByteBuffer>
+{
+
+    // These fields are declared here rather than in Heap-X-Buffer in order to reduce the number of virtual method invocations needed to access these values, which is especially costly when coding small buffers.
+    //
+    final byte[] hb;                  // Non-null only for heap buffers--由于已经final，所以必须创建新数组，并且需要开发者自己完成
+    final int offset;
+    boolean isReadOnly;                 // Valid only for heap buffers
+
+    // Creates a new buffer with the given mark, position, limit, capacity, backing array, and array offset
+    //
+    ByteBuffer(int mark, int pos, int lim, int cap,   // package-private
+                 byte[] hb, int offset)
+    {
+        super(mark, pos, lim, cap);
+        this.hb = hb;
+        this.offset = offset;
+    }
+
+JDK的ByteBuffer的缺点：
+
+1.final byte[] hb; 这是JDKByteBuffer对象中用于存储数据的对象声明；长度不变，无法动态扩容；当存储数据字节很大时很可能出现IndexOutOfBoundsException
+如果要预防这个异常，那么需要在存储之前完全确认好待存储的字节大小。
+如果不足，必须创建新对象，再将数据复制过去，这一切必须要由开发者手动完成
+2.ByteBuffer只使用一个position指针来标识位置信息，在进行读写切换时，就要调用flip()方法或是rewind方法，使用起来不方便
+
+Netty的ByteBuf的优点：
+1.存储字节数组是动态的，最大值Integer。MAX_VALUE。这里的动态是write方法，会判断容量，不足则扩容
+2.读写完全分离，使用方便
+
+============================AbstractByteBuf
+    @Override
+    public ByteBuf writeByte(int value) {
+        ensureWritable0(1);
+        _setByte(writerIndex++, value);
+        return this;
+    }
+
+     final void ensureWritable0(int minWritableBytes) {
+        ensureAccessible();
+        if (minWritableBytes <= writableBytes()) {
+            return;
+        }
+        if (checkBounds) {
+            if (minWritableBytes > maxCapacity - writerIndex) {
+                throw new IndexOutOfBoundsException(String.format(
+                        "writerIndex(%d) + minWritableBytes(%d) exceeds maxCapacity(%d): %s",
+                        writerIndex, minWritableBytes, maxCapacity, this));
+            }
+        }
+
+        // 将当前容量标准化为2的幂。
+        int newCapacity = alloc().calculateNewCapacity(writerIndex + minWritableBytes, maxCapacity);
+
+        // Adjust to the new capacity.
+        capacity(newCapacity);
+    }
+
+
+
+====================================UnpooledHeapByteBuf
+/**
+ * Big endian Java堆缓冲区实现。建议使用{@link UnpooledByteBufAllocator＃heapBuffer（int，int）}，
+ {@ link Unpooled＃buffer（int）}和{@link Unpooled＃wrappedBuffer（byte []）}，而不是显式调用构造函数。
+ */
+public class UnpooledHeapByteBuf extends AbstractReferenceCountedByteBuf {
+
+    private final ByteBufAllocator alloc;
+    byte[] array;   --无final
+    private ByteBuffer tmpNioBuf;

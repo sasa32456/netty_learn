@@ -1,0 +1,24 @@
+Netty处理器概念
+
+1.可以分为两种：入站与出站
+2.入站最顶层ChannelInboundHandler,出站最高顶层ChannelOutboundHandler
+3.数据处理时常用的各种编解码器本质都是处理器
+4.编解码器：无论什么数据，在网络中都以字节流形式呈现；将数据由原本形式转为字节流称为编码（encode），
+将字节流转为原本的格式或是其他格式叫解码（decode），编解码统一称为（codec）
+5.编码：本质是出站处理器，因此，编码一定是一种ChannelOutboundHandler
+6.解码：本质是入站处理器，因此，解码一定是一种ChannelInboundHandler
+7.在Netty中，编码器通常以XXXEncoder命名，解码以XXXDecoder命名
+
+         pipeline.addLast(new LengthFieldBasedFrameDecoder(Integer.MAX_VALUE, 0, 4, 0, 4));
+        pipeline.addLast(new LengthFieldPrepender(4));
+        pipeline.addLast(new StringDecoder(CharsetUtil.UTF_8));
+        pipeline.addLast(new StringEncoder(CharsetUtil.UTF_8));--出站
+        pipeline.addLast(new MyServerHandler());
+ 即使载入站处理器中有出站处理器，依旧会放入出站处理器不会提前出站
+        pipeline.addLast(new LengthFieldBasedFrameDecoder(Integer.MAX_VALUE, 0, 4, 0, 4));
+        pipeline.addLast(new LengthFieldPrepender(4));
+        pipeline.addLast(new StringDecoder(CharsetUtil.UTF_8));
+        pipeline.addLast(new StringEncoder(CharsetUtil.UTF_8));
+        pipeline.addLast(new MyClientHandler());
+
+

@@ -1,0 +1,342 @@
+=================================================ServerBootstrap===============================================
+
+@Override
+    void init(Channel channel) throws Exception {
+        //
+        final Map<ChannelOption<?>, Object> options = options0();
+        synchronized (options) {
+            setChannelOptions(channel, options, logger);
+        }
+
+        final Map<AttributeKey<?>, Object> attrs = attrs0();
+        synchronized (attrs) {
+            for (Entry<AttributeKey<?>, Object> e: attrs.entrySet()) {
+                @SuppressWarnings("unchecked")
+                AttributeKey<Object> key = (AttributeKey<Object>) e.getKey();
+                channel.attr(key).set(e.getValue());
+            }
+        }
+
+        ChannelPipeline p = channel.pipeline();
+
+        final EventLoopGroup currentChildGroup = childGroup;
+        final ChannelHandler currentChildHandler = childHandler;
+        final Entry<ChannelOption<?>, Object>[] currentChildOptions;
+        final Entry<AttributeKey<?>, Object>[] currentChildAttrs;
+        synchronized (childOptions) {
+            currentChildOptions = childOptions.entrySet().toArray(newOptionArray(0));
+        }
+        synchronized (childAttrs) {
+            currentChildAttrs = childAttrs.entrySet().toArray(newAttrArray(0));
+        }
+
+        p.addLast(new ChannelInitializer<Channel>() {
+            @Override
+            public void initChannel(final Channel ch) throws Exception {
+                final ChannelPipeline pipeline = ch.pipeline();
+                ChannelHandler handler = config.handler();
+                if (handler != null) {
+                    pipeline.addLast(handler);
+                }
+
+                ch.eventLoop().execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        pipeline.addLast(new ServerBootstrapAcceptor(
+                                ch, currentChildGroup, currentChildHandler, currentChildOptions, currentChildAttrs));
+                    }
+                });
+            }
+        });
+    }
+
+
+==================================ChannelOption维护key，值在别的地方维护=====================================
+ /**
+* {@link ChannelOption}允许以类型安全的方式配置{@link ChannelConfig}。
+支持哪个{@link ChannelOption}取决于{@link ChannelConfig}的实际实现，并且可能取决于它所属的传输的性质。
+  *
+  * @param <T>   the type of the value which is valid for the {@link ChannelOption}
+  */
+ public class ChannelOption<T> extends AbstractConstant<ChannelOption<T>> {
+   。。。
+    /**
+     *如果存在给定{@code name}的{@link ChannelOption}，则为给定的{@code name}创建新的{@link ChannelOption}或使用{@link IllegalArgumentException}失败。
+     * /
+    @SuppressWarnings("unchecked")
+    public static <T> ChannelOption<T> newInstance(String name) {
+        return (ChannelOption<T>) pool.newInstance(name);
+    }
+
+    public static final ChannelOption<ByteBufAllocator> ALLOCATOR = valueOf("ALLOCATOR");
+    public static final ChannelOption<RecvByteBufAllocator> RCVBUF_ALLOCATOR = valueOf("RCVBUF_ALLOCATOR");
+    public static final ChannelOption<MessageSizeEstimator> MESSAGE_SIZE_ESTIMATOR = valueOf("MESSAGE_SIZE_ESTIMATOR");
+
+
+
+    /**
+     * 返回指定名称的{@link ChannelOption}。
+     */
+    @SuppressWarnings("unchecked")
+    public static <T> ChannelOption<T> valueOf(String name) {
+        return (ChannelOption<T>) pool.valueOf(name);
+    }
+
+    /**
+     * {@link #valueOf（String）valueOf（firstNameComponent.getName（）+“＃”+ secondNameComponent）}的快捷方式。
+     */
+    @SuppressWarnings("unchecked")
+    public static <T> ChannelOption<T> valueOf(Class<?> firstNameComponent, String secondNameComponent) {
+        return (ChannelOption<T>) pool.valueOf(firstNameComponent, secondNameComponent);
+    }
+。。。
+}
+===========================================AbstractConstant==================
+/**
+ * Base implementation of {@link Constant}.
+ */
+public abstract class AbstractConstant<T extends AbstractConstant<T>> implements Constant<T> {
+
+    private static final AtomicLong uniqueIdGenerator = new AtomicLong();
+    private final int id;
+    private final String name;
+    private final long uniquifier;
+
+    /**
+     * Creates a new instance.
+     */
+    protected AbstractConstant(int id, String name) {
+        this.id = id;
+        this.name = name;
+        this.uniquifier = uniqueIdGenerator.getAndIncrement();
+    }
+==================================================Constant==========================
+/ **
+ *通过{@code ==}运算符可以安全比较的单例。由{@link ConstantPool}创建和管理。
+ * /
+public interface Constant<T extends Constant<T>> extends Comparable<T> {
+
+    / **
+     *返回分配给此{@link Constant}的唯一编号。
+     * /
+    int id();
+
+    / **
+     *返回此{@link Constant}的名称。
+     * /
+    String name();
+}
+===============================ConstantPool============================
+/**
+ * A pool of {@link Constant}s.
+ *
+ * @param <T> the type of the constant
+ */
+public abstract class ConstantPool<T extends Constant<T>> {
+
+    /**================PlatformDependent
+        为当前平台创建一个新的最快{@link ConcurrentMap}实现。
+        public static <K, V> ConcurrentMap<K, V> newConcurrentHashMap() {
+            return new ConcurrentHashMap<K, V>();
+        }
+    */
+    private final ConcurrentMap<String, T> constants = PlatformDependent.newConcurrentHashMap();
+
+    private final AtomicInteger nextId = new AtomicInteger(1);
+
+    /**
+     * Shortcut of {@link #valueOf(String) valueOf(firstNameComponent.getName() + "#" + secondNameComponent)}.
+     */
+    public T valueOf(Class<?> firstNameComponent, String secondNameComponent) {
+        if (firstNameComponent == null) {
+            throw new NullPointerException("firstNameComponent");
+        }
+        if (secondNameComponent == null) {
+            throw new NullPointerException("secondNameComponent");
+        }
+
+        return valueOf(firstNameComponent.getName() + '#' + secondNameComponent);
+    }
+
+    /**
+     * 返回分配给指定{@code name}的{@link Constant}。如果没有这样的{@link Constant}，将创建并返回一个新的。
+     一旦创建，具有相同{@code name}的后续调用将始终返回先前创建的调用（即单例）。
+     *
+     * @param name the name of the {@link Constant}
+     */
+    public T valueOf(String name) {
+        checkNotNullAndNotEmpty(name);
+        return getOrCreate(name);
+    }
+
+    /**
+        *按名称获取现有常量，或者如果不存在则创建新常量。线程安全
+     *
+     * @param name the name of the {@link Constant}
+     */
+    private T getOrCreate(String name) {
+        T constant = constants.get(name);
+        if (constant == null) {
+            final T tempConstant = newConstant(nextId(), name);
+            constant = constants.putIfAbsent(name, tempConstant);
+            if (constant == null) {
+                return tempConstant;
+            }
+        }
+
+        return constant;
+    }
+
+    /**
+     * Returns {@code true} if a {@link AttributeKey} exists for the given {@code name}.
+     */
+    public boolean exists(String name) {
+        checkNotNullAndNotEmpty(name);
+        return constants.containsKey(name);
+    }
+
+    /**
+     * Creates a new {@link Constant} for the given {@code name} or fail with an {@link IllegalArgumentException} if a {@link Constant} for the given {@code name} exists.
+     */
+    public T newInstance(String name) {
+        checkNotNullAndNotEmpty(name);
+        return createOrThrow(name);
+    }
+
+    /**
+     * Creates constant by name or throws exception. Threadsafe
+     *
+     * @param name the name of the {@link Constant}
+     */
+    private T createOrThrow(String name) {
+        T constant = constants.get(name);
+        if (constant == null) {
+            final T tempConstant = newConstant(nextId(), name);
+            constant = constants.putIfAbsent(name, tempConstant);
+            if (constant == null) {
+                return tempConstant;
+            }
+        }
+
+        throw new IllegalArgumentException(String.format("'%s' is already in use", name));
+    }
+
+    private static String checkNotNullAndNotEmpty(String name) {
+        ObjectUtil.checkNotNull(name, "name");
+
+        if (name.isEmpty()) {
+            throw new IllegalArgumentException("empty name");
+        }
+
+        return name;
+    }
+    //由子类实现
+    protected abstract T newConstant(int id, String name);
+
+    @Deprecated
+    public final int nextId() {
+        return nextId.getAndIncrement();
+    }
+}
+========================ChannelConfig=========================================
+/ **
+ * {@link Channel}的一组配置属性。
+ * <p>
+ *请向下转换为更具体的配置类型，例如{@link SocketChannelConfig}或使用{@link #setOptions（Map）}来设置特定于传输的属性：
+ * <pre>
+ * {@link Channel} ch = ...;
+ * {@link SocketChannelConfig} cfg = <strong>（{@ link SocketChannelConfig}）ch.getConfig（）; </ strong>
+ * cfg.setTcpNoDelay（false）;
+ * </ pre>
+ *
+ * <h3>选项图</ h3>
+ *
+ *选项映射属性是一个动态只写属性，允许配置{@link Channel}而无需缩减其关联的{@link ChannelConfig}。要更新选项地图，请致电{@link #setOptions（Map）}。
+ * <p>
+ *所有{@link ChannelConfig}都有以下选项：
+ *
+ * <table border =“1”cellspacing =“0”cellpadding =“6”>
+ * <tr>
+ * <th>名称</ th> <th>相关的setter方法</ th>
+ * </ tr> <tr>
+ * <td> {@ link ChannelOption＃CONNECT_TIMEOUT_MILLIS} </ td> <td> {@ link #setConnectTimeoutMillis（int）} </ td>
+ * </ tr> <tr>
+ * <td> {@ link ChannelOption #WRITE_SPIN_COUNT} </ td> <td> {@ link #setWriteSpinCount（int）} </ td>
+ * </ tr> <tr>
+ * <td> {@ link ChannelOption＃WRITE_BUFFER_WATER_MARK} </ td> <td> {@ link #setWriteBufferWaterMark（WriteBufferWaterMark）} </ td>
+ * </ tr> <tr>
+ * <td> {@ link ChannelOption＃ALLOCATOR} </ td> <td> {@ link #setAllocator（ByteBufAllocator）} </ td>
+ * </ tr> <tr>
+ * <td> {@ link ChannelOption #AUTO_READ} </ td> <td> {@ link #setAutoRead（boolean）} </ td>
+ * </ tr>
+ * </ table>
+ * <p>
+ * {@link ChannelConfig}的子类型中提供了更多选项。例如，您可以配置特定于TCP / IP套接字的参数，如{@link SocketChannelConfig}中所述。
+ * /
+public interface ChannelConfig {
+。。。
+    /**
+     *设置具有指定名称和值的配置属性。要正确覆盖此方法，您必须调用超类：
+     * <pre>
+     * public boolean setOption(ChannelOption&lt;T&gt; option, T value) {
+     *     if (super.setOption(option, value)) {
+     *         return true;
+     *     }
+     *
+     *     if (option.equals(additionalOption)) {
+     *         ....
+     *         return true;
+     *     }
+     *
+     *     return false;
+     * }
+     * </pre>
+     *
+     * @return {@code true} if and only if the property has been set
+     */
+    <T> boolean setOption(ChannelOption<T> option, T value);
+
+。。。
+}
+========================AttributeKey==========================
+/**
+*可用于从{@link AttributeMap}访问{@link Attribute}的密钥。请注意，不可能有多个具有相同名称的键。
+ *
+ * @param <T>   the type of the {@link Attribute} which can be accessed via this {@link AttributeKey}.
+ */
+@SuppressWarnings("UnusedDeclaration") // 'T' is used only at compile time
+public final class AttributeKey<T> extends AbstractConstant<AttributeKey<T>> {
+
+    private static final ConstantPool<AttributeKey<Object>> pool = new ConstantPool<AttributeKey<Object>>() {
+        @Override
+        protected AttributeKey<Object> newConstant(int id, String name) {
+            return new AttributeKey<Object>(id, name);
+        }
+    };
+================Attribute========================
+/**
+ * An attribute which allows to store a value reference. It may be updated atomically and so is thread-safe.
+ *
+ * @param <T>   the type of the value it holds.
+ */
+public interface Attribute<T> {
+
+}
+
+===============================AttributeMap==========
+/**
+ * Holds {@link Attribute}s which can be accessed via {@link AttributeKey}.
+ *
+ * Implementations must be Thread-safe.
+ */
+public interface AttributeMap {
+   / **
+     *获取给定{@link AttributeKey}的{@link Attribute}。此方法永远不会返回null，但可能会返回尚未设置值的{@link Attribute}。
+     * /
+    <T> Attribute<T> attr(AttributeKey<T> key);
+
+    / **
+     *当且仅当此{@link AttributeMap}中存在给定的{@link Attribute}时，才返回{@code} true。
+     * /
+    <T> boolean hasAttr(AttributeKey<T> key);
+}

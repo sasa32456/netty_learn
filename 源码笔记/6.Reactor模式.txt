@@ -1,0 +1,13 @@
+Reactor模式
+反应器模式
+Proactor模式--多路复用
+Netty整体使用Reactor模式
+
+Responsive Design响应
+
+scalable io in java
+
+有空自己打一遍
+
+
+

@@ -1,0 +1,134 @@
+=========================================LengthFieldBasedFrameDecoder============================
+
+/**
+*一个解码器，它通过消息中长度字段的值动态地分割接收的{@link ByteBuf}。
+当您解码具有表示消息正文或整个消息的长度的整数标头字段的二进制消息时，它尤其有用。
+ * <p> {@link LengthFieldBasedFrameDecoder}有许多配置参数，因此它可以解码任何带有长度字段的消息，这在专有的客户端 - 服务器协议中经常出现。
+ 以下是一些示例，它将为您提供有关哪个选项执行操作的基本概念。
+ *
+ * <h3>偏移0处的2字节长度字段，不剥离标题</ h3>
+ *
+ *此示例中长度字段的值为<tt> 12（0x0C）</ tt>，表示“HELLO，WORLD”的长度。默认情况下，
+ 解码器假定长度字段表示长度字段后面的字节数。因此，它可以用简单的参数组合进行解码。
+ * <pre>
+ * <b>lengthFieldOffset</b>   = <b>0</b>
+ * <b>lengthFieldLength</b>   = <b>2</b>
+ * lengthAdjustment    = 0
+ * initialBytesToStrip = 0 (= do not strip header)
+ *
+ * BEFORE DECODE (14 bytes)         AFTER DECODE (14 bytes)
+ * +--------+----------------+      +--------+----------------+
+ * | Length | Actual Content |----->| Length | Actual Content |
+ * | 0x000C | "HELLO, WORLD" |      | 0x000C | "HELLO, WORLD" |
+ * +--------+----------------+      +--------+----------------+
+ * </pre>
+ *
+* <h3>偏移0处的2字节长度字段，条带标题</ h3>
+ *
+*因为我们可以通过调用{@link ByteBuf＃readableBytes（）}来获取内容的长度，所以您可能希望通过指定<tt> initialBytesToStrip </ tt>来去除长度字段。
+在这个例子中，我们指定了<tt> 2 </ tt>，它与长度字段的长度相同，以去除前两个字节。
+ * <pre>
+ * lengthFieldOffset   = 0
+ * lengthFieldLength   = 2
+ * lengthAdjustment    = 0
+ * <b>initialBytesToStrip</b> = <b>2</b> (= the length of the Length field)
+ *
+ * BEFORE DECODE (14 bytes)         AFTER DECODE (12 bytes)
+ * +--------+----------------+      +----------------+
+ * | Length | Actual Content |----->| Actual Content |
+ * | 0x000C | "HELLO, WORLD" |      | "HELLO, WORLD" |
+ * +--------+----------------+      +----------------+
+ * </pre>
+ *
+* <h3>偏移0处的2字节长度字段，不剥离标头，长度字段表示整个消息的长度</ h3>
+ *
+ *在大多数情况下，length字段仅表示消息体的长度，如前面的示例所示。但是，在某些协议中，length字段表示整个消息的长度，包括消息头。
+ 在这种情况下，我们指定一个非零<tt> lengthAdjustment </ tt>。由于此示例消息中的长度值始终大于体长<tt> 2 </ tt>，因此我们将<tt> -2 </ tt>指定为
+ <tt>lengthAdjustment </ tt>进行补偿。
+ * <pre>
+ * lengthFieldOffset   =  0
+ * lengthFieldLength   =  2
+ * <b>lengthAdjustment</b>    = <b>-2</b> (= the length of the Length field)
+ * initialBytesToStrip =  0
+ *
+ * BEFORE DECODE (14 bytes)         AFTER DECODE (14 bytes)
+ * +--------+----------------+      +--------+----------------+
+ * | Length | Actual Content |----->| Length | Actual Content |
+ * | 0x000E | "HELLO, WORLD" |      | 0x000E | "HELLO, WORLD" |
+ * +--------+----------------+      +--------+----------------+
+ * </pre>
+ *
+* <h3> 5字节标题末尾的3字节长度字段，不剥离标题</ h3>
+ *
+ *以下消息是第一个示例的简单变体。消息前面附加了一个额外的标头值。 <tt> lengthAdjustment </ tt>再次为零，因为解码器总是在帧长度计算期间考虑前置数据的长度。
+ * <pre>
+ * <b>lengthFieldOffset</b>   = <b>2</b> (= the length of Header 1)
+ * <b>lengthFieldLength</b>   = <b>3</b>
+ * lengthAdjustment    = 0
+ * initialBytesToStrip = 0
+ *
+ * BEFORE DECODE (17 bytes)                      AFTER DECODE (17 bytes)
+ * +----------+----------+----------------+      +----------+----------+----------------+
+ * | Header 1 |  Length  | Actual Content |----->| Header 1 |  Length  | Actual Content |
+ * |  0xCAFE  | 0x00000C | "HELLO, WORLD" |      |  0xCAFE  | 0x00000C | "HELLO, WORLD" |
+ * +----------+----------+----------------+      +----------+----------+----------------+
+ * </pre>
+ *
+* <h3> 5字节标题开头的3字节长度字段，不剥离标题</ h3>
+ *
+ *这是一个高级示例，显示了长度字段和邮件正文之间存在额外标头的情况。您必须指定正<tt> lengthAdjustment </ tt>，以便解码器将额外标头计入帧长度计算。
+ * <pre>
+ * lengthFieldOffset   = 0
+ * lengthFieldLength   = 3
+ * <b>lengthAdjustment</b>    = <b>2</b> (= the length of Header 1)
+ * initialBytesToStrip = 0
+ *
+ * BEFORE DECODE (17 bytes)                      AFTER DECODE (17 bytes)
+ * +----------+----------+----------------+      +----------+----------+----------------+
+ * |  Length  | Header 1 | Actual Content |----->|  Length  | Header 1 | Actual Content |
+ * | 0x00000C |  0xCAFE  | "HELLO, WORLD" |      | 0x00000C |  0xCAFE  | "HELLO, WORLD" |
+ * +----------+----------+----------------+      +----------+----------+----------------+
+ * </pre>
+ *
+* <h3> 2字节长度字段，偏移量为1，位于4字节头的中间，剥离第一个头字段和长度字段</ h3>
+ *
+ *这是上述所有示例的组合。在长度字段之前有前置标题，在长度字段之后有额外的标题。
+ 前置标题影响<tt> lengthFieldOffset </ tt>，额外标题会影响<tt> lengthAdjustment </ tt>。
+ 我们还指定了一个非零<tt> initialBytesToStrip </ tt>来从帧中去除长度字段和前置标题。
+ 如果您不想删除前置标题，则可以为<tt> initialBytesToSkip </ tt>指定<tt> 0 </ tt>。
+ * <pre>
+ * lengthFieldOffset   = 1 (= the length of HDR1)
+ * lengthFieldLength   = 2
+ * <b>lengthAdjustment</b>    = <b>1</b> (= the length of HDR2)
+ * <b>initialBytesToStrip</b> = <b>3</b> (= the length of HDR1 + LEN)
+ *
+ * BEFORE DECODE (16 bytes)                       AFTER DECODE (13 bytes)
+ * +------+--------+------+----------------+      +------+----------------+
+ * | HDR1 | Length | HDR2 | Actual Content |----->| HDR2 | Actual Content |
+ * | 0xCA | 0x000C | 0xFE | "HELLO, WORLD" |      | 0xFE | "HELLO, WORLD" |
+ * +------+--------+------+----------------+      +------+----------------+
+ * </pre>
+ *
+* <h3> 2字节长度字段在4字节头中间偏移1处，剥离第一个头字段和长度字段，长度字段表示整个消息的长度</ h3>
+ *
+ *让我们再举一个上一个例子。与前一个示例的唯一区别是length字段表示整个消息的长度而不是消息正文，就像第三个示例一样。
+ 我们必须将HDR1和Length的长度计算为<tt> lengthAdjustment </ tt>。请注意，我们不需要考虑HDR2的长度，因为长度字段已包含整个标头长度。
+ * <pre>
+ * lengthFieldOffset   =  1
+ * lengthFieldLength   =  2
+ * <b>lengthAdjustment</b>    = <b>-3</b> (= the length of HDR1 + LEN, negative)
+ * <b>initialBytesToStrip</b> = <b> 3</b>
+ *
+ * BEFORE DECODE (16 bytes)                       AFTER DECODE (13 bytes)
+ * +------+--------+------+----------------+      +------+----------------+
+ * | HDR1 | Length | HDR2 | Actual Content |----->| HDR2 | Actual Content |
+ * | 0xCA | 0x0010 | 0xFE | "HELLO, WORLD" |      | 0xFE | "HELLO, WORLD" |
+ * +------+--------+------+----------------+      +------+----------------+
+ * </pre>
+ * @see LengthFieldPrepender
+ */
+public class LengthFieldBasedFrameDecoder extends ByteToMessageDecoder {
+
+com.n33.netty.learn.handler2粘包测试
+com.n33.netty.learn.handler3粘包拆包
+

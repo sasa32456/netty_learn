@@ -1,0 +1,430 @@
+=========================================FutureTask（JDK）=========================================================
+
+
+
+/**
+ * {@code Future}表示异步计算的结果。提供方法以检查计算是否完成，等待其完成，以及检索计算结果。只有在计算完成后才能使用方法{@code get}检索结果，
+ 必要时阻塞直到准备就绪。取消由{@code cancel}方法执行。提供了其他方法来确定任务是否正常完成或被取消。计算完成后，
+ 无法取消计算。如果您想使用{@code Future}以获取可取消性但不提供可用结果，您可以声明{@code Future <？>}形式的类型并返回{@code null}作为结果基本任务。
+ *
+ * <p>
+ * <b>Sample Usage</b> (Note that the following classes are all
+ * made-up.)
+ * <pre> {@code
+ * interface ArchiveSearcher { String search(String target); }
+ * class App {
+ *   ExecutorService executor = ...
+ *   ArchiveSearcher searcher = ...
+ *   void showSearch(final String target)
+ *       throws InterruptedException {
+ *     Future<String> future
+ *       = executor.submit(new Callable<String>() {
+ *         public String call() {
+ *             return searcher.search(target);
+ *         }});
+ *     displayOtherThings(); // do other things while searching
+ *     try {
+ *       displayText(future.get()); // use future
+ *     } catch (ExecutionException ex) { cleanup(); return; }
+ *   }
+ * }}</pre>
+ *
+ * {@link FutureTask}类是实现{@code Runnable}的{@code Future}的实现，因此可以由{@code Executor}执行。例如，{@code submit}的上述结构可以替换为：
+ *  <pre> {@code
+ * FutureTask<String> future =
+ *   new FutureTask<String>(new Callable<String>() {
+ *     public String call() {
+ *       return searcher.search(target);
+ *   }});
+ * executor.execute(future);}</pre>
+ *
+ * <p>内存一致性效果：异步计算采取的操作<a href="package-summary.html#MemoryVisibility"> <i>发生在</ i> </a>之后的行为跟随相应的{@code Future .get（）}在另一个线程中。
+ *
+ * @see FutureTask
+ * @see Executor
+ * @since 1.5
+ * @author Doug Lea
+ * @param <V> The result type returned by this Future's {@code get} method
+ */
+public interface Future<V> {
+
+
+。。。
+}
+
+
+
+=========================================FutureTask(JDK)=========================================================
+/**
+ * 可取消的异步计算。该类提供了{@link Future}的基本实现，包括启动和取消计算的方法，查询计算是否完成的查询，以及检索计算结果。
+ 只有在计算完成后才能检索结果;如果计算尚未完成，{@code get}方法将被阻止。计算完成后，无法重新启动或取消计算
+ （除非使用{@link #runAndReset}调用计算）。
+ *
+ * <p>可以使用{@code FutureTask}来包装{@link Callable}或{@link Runnable}对象。
+ 因为{@code FutureTask}实现了{@code Runnable}，所以可以将{@code FutureTask}提交给{@link Executor}以供执行。
+ *
+ * <p>除了作为独立类之外，此类还提供{@code protected}功能，这在创建自定义任务类时可能很有用。
+ *
+ * @since 1.5
+ * @author Doug Lea
+ * @param <V> The result type returned by this FutureTask's {@code get} methods
+ */
+public class FutureTask<V> implements RunnableFuture<V> {
+    /*
+     *修订说明：这与此类依赖于AbstractQueuedSynchronizer的以前版本不同，主要是为了避免让用户在取消比赛期间保留中断状态。
+     当前设计中的同步控制依赖于通过CAS更新的“状态”字段以跟踪完成，以及用于保存等待线程的简单Treiber堆栈。
+     *
+     *样式注释：像往常一样，我们绕过了使用AtomicXFieldUpdaters的开销，而是直接使用Unsafe内在函数。
+     * /
+
+    /**
+     *此任务的运行状态，最初为NEW。运行状态仅在方法set，setException和cancel中转​​换为终端状态。
+     在完成期间，状态可以采用COMPLETING的瞬态值（在设置结果时）或INTERRUPTING（仅在中断转轮以满足取消（true）时）。
+     从这些中间状态到最终状态的转换使用更便宜的有序/惰性写入，因为值是唯一的并且不能进一步修改。
+     *
+     * 可能的状态转换：
+     * NEW -> COMPLETING -> NORMAL
+     * NEW -> COMPLETING -> EXCEPTIONAL
+     * NEW -> CANCELLED
+     * NEW -> INTERRUPTING -> INTERRUPTED
+     */
+    private volatile int state;
+    private static final int NEW          = 0;
+    private static final int COMPLETING   = 1;
+    private static final int NORMAL       = 2;
+    private static final int EXCEPTIONAL  = 3;
+    private static final int CANCELLED    = 4;
+    private static final int INTERRUPTING = 5;
+    private static final int INTERRUPTED  = 6;
+
+    /** The underlying callable; nulled out after running */
+    private Callable<V> callable;
+    /** The result to return or exception to throw from get() */
+    private Object outcome; // non-volatile, protected by state reads/writes
+    /** The thread running the callable; CASed during run() */
+    private volatile Thread runner;
+    /** Treiber stack of waiting threads */
+    private volatile WaitNode waiters;
+
+
+
+
+
+ 。。。
+
+}
+
+
+=========================================Future(Netty)=========================================================
+
+/**
+ * The result of an asynchronous operation.
+ */
+@SuppressWarnings("ClassNameSameAsAncestorName")
+public interface Future<V> extends java.util.concurrent.Future<V> {
+
+    /**
+     * 当且仅当I / O操作成功完成时，返回{@code true}。
+     */
+    boolean isSuccess();
+
+    /**
+     * 当且仅当可以通过{@link #cancel（boolean）}取消操作时，才返回{@code true}。
+     */
+    boolean isCancellable();
+
+    /**
+     * 如果I / O操作失败，则返回I / O操作失败的原因。
+     *
+     * @return the cause of the failure.
+     *         {@code null} if succeeded or this future is not
+     *         completed yet.
+     */
+    Throwable cause();
+
+    /**
+     * Adds the specified listener to this future.  The specified listener is notified when this future is {@linkplain #isDone() done}.  If this future is already completed, the specified listener is notified immediately.
+     * 将指定的侦听器添加到此将来。当这个未来是{@linkplain #isDone（）done}时，会通知指定的侦听器。如果此未来已完成，则立即通知指定的侦听器。
+     --GenericFutureListener观察者模式，当完成，则会触发，得到后续调用
+     */
+    Future<V> addListener(GenericFutureListener<? extends Future<? super V>> listener);
+
+    /**
+     * Adds the specified listeners to this future.  The specified listeners are notified when this future is {@linkplain #isDone() done}.  If this future is already completed, the specified listeners are notified immediately.
+     * 将指定的侦听器添加到此将来。当这个未来是{@linkplain #isDone（）done}时，会通知指定的侦听器。如果此未来已完成，则会立即通知指定的侦听器。
+     */
+    Future<V> addListeners(GenericFutureListener<? extends Future<? super V>>... listeners);
+
+    /**
+     * 从此将来删除第一次出现的指定侦听器。当这个未来是{@linkplain #isDone（）done}时，不再通知指定的侦听器。如果指定的侦听器未与此未来关联，则此方法不执行任何操作并以静默方式返回。
+     */
+    Future<V> removeListener(GenericFutureListener<? extends Future<? super V>> listener);
+
+    /**
+     * 从此将来删除每个侦听器的第一个匹配项。当这个未来是{@linkplain #isDone（）done}时，不再通知指定的侦听器。如果指定的侦听器未与此未来关联，则此方法不执行任何操作并以静默方式返回。
+     */
+    Future<V> removeListeners(GenericFutureListener<? extends Future<? super V>>... listeners);
+
+    /**
+     * Waits for this future until it is done, and rethrows the cause of the failure if this future failed.
+     * 等待这个未来，直到它完成，如果这个未来失败，重新抛出失败的原因。
+     */
+    Future<V> sync() throws InterruptedException;
+
+    /**
+     * 等待这个未来，直到它完成，如果这个未来失败，重新抛出失败的原因。--无法中断
+     */
+    Future<V> syncUninterruptibly();
+
+    /**
+     * Waits for this future to be completed.
+     * 等待这个未来完成。
+     *
+     * @throws InterruptedException
+     *         if the current thread was interrupted
+     */
+    Future<V> await() throws InterruptedException;
+
+    /**
+     * Waits for this future to be completed without interruption.  This method catches an {@link InterruptedException} and discards it silently.
+     * 等待这个未来不间断地完成。此方法捕获{@link InterruptedException}并以静默方式丢弃它。
+     */
+    Future<V> awaitUninterruptibly();
+
+    /**
+     * Waits for this future to be completed within the
+     * specified time limit.
+     *
+     * @return {@code true} if and only if the future was completed within
+     *         the specified time limit
+     *
+     * @throws InterruptedException
+     *         if the current thread was interrupted
+     */
+    boolean await(long timeout, TimeUnit unit) throws InterruptedException;
+
+    /**
+     * Waits for this future to be completed within the
+     * specified time limit.
+     *
+     * @return {@code true} if and only if the future was completed within
+     *         the specified time limit
+     *
+     * @throws InterruptedException
+     *         if the current thread was interrupted
+     */
+    boolean await(long timeoutMillis) throws InterruptedException;
+
+    /**
+     * Waits for this future to be completed within the
+     * specified time limit without interruption.  This method catches an
+     * {@link InterruptedException} and discards it silently.
+     *
+     * @return {@code true} if and only if the future was completed within
+     *         the specified time limit
+     */
+    boolean awaitUninterruptibly(long timeout, TimeUnit unit);
+
+    /**
+     * Waits for this future to be completed within the
+     * specified time limit without interruption.  This method catches an
+     * {@link InterruptedException} and discards it silently.
+     *
+     * @return {@code true} if and only if the future was completed within
+     *         the specified time limit
+     */
+    boolean awaitUninterruptibly(long timeoutMillis);
+
+    /**
+     * Return the result without blocking. If the future is not done yet this will return {@code null}.
+     * 无阻塞地返回结果。如果未来尚未完成，则返回{@code null}。
+     *
+     * As it is possible that a {@code null} value is used to mark the future as successful you also need to check if the future is really done with {@link #isDone()} and not relay on the returned {@code null} value.
+     * 由于有可能使用{@code null}值将未来标记为成功，因此您还需要检查未来是否真的使用{@link #isDone（）}并且未在返回的{@code null上进行中继价值。
+     */
+    V getNow();
+
+    /**
+     * {@inheritDoc}
+     *
+     * If the cancellation was successful it will fail the future with an {@link CancellationException}.
+     * 如果取消成功，将来会以{@link CancellationException}失败。
+     */
+    @Override
+    boolean cancel(boolean mayInterruptIfRunning);
+}
+}
+
+======================================GenericFutureListener
+
+/**
+ * 收听{@link Future}的结果。通过调用{@link Future＃addListener（GenericFutureListener）}添加此侦听器后，将通知异步操作的结果。
+ */
+public interface GenericFutureListener<F extends Future<?>> extends EventListener {
+
+    /**
+     * 与{@link Future}关联的操作完成时调用。
+     *
+     * @param future  the source {@link Future} which called this callback
+     */
+    void operationComplete(F future) throws Exception;
+}
+
+======================================ChannelFuture===========================================================
+/**
+ * 异步{@link Channel} I / O操作的结果。
+ * <p>
+ * Netty中的所有I / O操作都是异步的。这意味着任何I / O调用都将立即返回，并且不保证在调用结束时所请求的I / O操作已完成。
+ 相反，您将返回一个{@link ChannelFuture}实例，该实例为您提供有关I / O操作的结果或状态的信息。
+ * <p>
+ * {@link ChannelFuture}是<em>未完成</ em>或<em>已完成</ em>。当I / O操作开始时，将创建一个新的未来对象。
+ 新的未来最初是未完成的 - 它既没有成功，也没有被取消，也没有被取消，因为I / O操作还没有完成。如果I / O操作成功完成，失败或取消，
+ 则将使用更具体的信息（例如失败原因）将未来标记为已完成。请注意，即使失败和取消也属于已完成的状态。
+ * <pre>
+ *                                      +---------------------------+
+ *                                      | Completed successfully    |
+ *                                      +---------------------------+
+ *                                 +---->      isDone() = true      |
+ * +--------------------------+    |    |   isSuccess() = true      |
+ * |        Uncompleted       |    |    +===========================+
+ * +--------------------------+    |    | Completed with failure    |
+ * |      isDone() = false    |    |    +---------------------------+
+ * |   isSuccess() = false    |----+---->      isDone() = true      |
+ * | isCancelled() = false    |    |    |       cause() = non-null  |
+ * |       cause() = null     |    |    +===========================+
+ * +--------------------------+    |    | Completed by cancellation |
+ *                                 |    +---------------------------+
+ *                                 +---->      isDone() = true      |
+ *                                      | isCancelled() = true      |
+ *                                      +---------------------------+
+ * </pre>
+ *
+ * 提供了各种方法来检查I / O操作是否已完成，等待完成，并检索I / O操作的结果。它还允许您添加{@link ChannelFutureListener}，以便在I / O操作完成时收到通知。
+ *
+ * <h3>首选{@link #addListener（GenericFutureListener）}到{@link #await（）} </ h3>
+ *
+ * 建议首选{@link #addListener（GenericFutureListener）}至{@link #await（）}，以便在完成I / O操作时获得通知并执行任何后续任务。
+ * <p> {@link #addListener（GenericFutureListener）}是非阻塞的。它只是将指定的{@link ChannelFutureListener}添加到
+ {@link ChannelFuture}，I / O线程将在完成与未来相关的I / O操作时通知侦听器。 {@link ChannelFutureListener}产生最佳性能和资源利用率
+ ，因为它根本不会阻塞，但如果您不习惯事件驱动编程，那么实现顺序逻辑可能会很棘手。
+ * <p>
+ *相比之下，{@ link #await（）}是一个阻塞操作。调用后，调用程序线程将一直阻塞，直到操作完成。使用{@link #await（）}实现顺序逻辑更容易，
+ 但调用程序线程在I / O操作完成之前不必要地阻塞，并且线程间通知的成本相对较高。此外，在特定情况下存在死锁的可能性，如下所述。
+ *
+ * <h3>请勿在{@link ChannelHandler} </ h3>内调用{@link #await（）}
+ * <p> {@link ChannelHandler}中的事件处理程序方法通常由I / O线程调用。如果由I / O线程调用的事件处理程序方法调用{@link #await（）}，
+ 则它正在等待的I / O操作可能永远不会完成，因为{@link #await（）}可以阻止它正在等待的I / O操作，这是一个死锁。
+
+ --await方法会阻塞I/O操作，互相等待导致死锁
+
+ * <pre>
+ * // BAD - NEVER DO THIS
+ * {@code @Override}
+ * public void channelRead({@link ChannelHandlerContext} ctx, Object msg) {
+ *     {@link ChannelFuture} future = ctx.channel().close();
+ *     future.awaitUninterruptibly();
+ *     // Perform post-closure operation
+ *     // ...
+ * }
+ *
+ * // GOOD
+ * {@code @Override}
+ * public void channelRead({@link ChannelHandlerContext} ctx, Object msg) {
+ *     {@link ChannelFuture} future = ctx.channel().close();
+ *     future.addListener(new {@link ChannelFutureListener}() {
+ *         public void operationComplete({@link ChannelFuture} future) {
+ *             // Perform post-closure operation
+ *             // ...
+ *         }
+ *     });
+ * }
+ * </pre>
+* <p>尽管存在上述缺点，但肯定会有更方便的方式来调用{@link #await（）}。在这种情况下，请确保不要在I / O线程中调用{@link #await（）}。
+否则，将引发{@link BlockingOperationException}以防止死锁。
+ * <h3>不要混淆I / O超时和等待超时</ h3>
+ --I/O超时是失败，等待超时是没获取
+ *使用{@link #await（long）}，{@ link #await（long，TimeUnit）}，{@ link #awaitUninterruptibly（long）}或
+ {@link #awaitUninterruptibly（long，TimeUnit）指定的超时值完全与I / O超时无关。如果I / O操作超时，则将来标记为“已完成但失败”
+ ，如上图所示。例如，应通过特定于传输的选项配置连接超时：
+ * <pre>
+ * // BAD - NEVER DO THIS
+ * {@link Bootstrap} b = ...;
+ * {@link ChannelFuture} f = b.connect(...);
+ * f.awaitUninterruptibly(10, TimeUnit.SECONDS);
+ * if (f.isCancelled()) {
+ *     // Connection attempt cancelled by user
+ * } else if (!f.isSuccess()) {
+ *     // You might get a NullPointerException here because the future
+ *     // might not be completed yet.
+ *     f.cause().printStackTrace();
+ * } else {
+ *     // Connection established successfully
+ * }
+ *
+ * // GOOD
+ * {@link Bootstrap} b = ...;
+ * // Configure the connect timeout option.
+ * <b>b.option({@link ChannelOption}.CONNECT_TIMEOUT_MILLIS, 10000);</b>
+ * {@link ChannelFuture} f = b.connect(...);
+ * f.awaitUninterruptibly();
+ *
+ * // Now we are sure the future is completed.
+ * assert f.isDone();
+ *
+ * if (f.isCancelled()) {
+ *     // Connection attempt cancelled by user
+ * } else if (!f.isSuccess()) {
+ *     f.cause().printStackTrace();
+ * } else {
+ *     // Connection established successfully
+ * }
+ * </pre>
+ */
+public interface ChannelFuture extends Future<Void> {
+
+    /**
+     * Returns a channel where the I/O operation associated with this future takes place.
+     * 返回与此未来相关的i/o操作发生的通道。
+     */
+    Channel channel();
+
+    @Override
+    ChannelFuture addListener(GenericFutureListener<? extends Future<? super Void>> listener);
+
+    @Override
+    ChannelFuture addListeners(GenericFutureListener<? extends Future<? super Void>>... listeners);
+
+    @Override
+    ChannelFuture removeListener(GenericFutureListener<? extends Future<? super Void>> listener);
+
+    @Override
+    ChannelFuture removeListeners(GenericFutureListener<? extends Future<? super Void>>... listeners);
+
+    @Override
+    ChannelFuture sync() throws InterruptedException;
+
+    @Override
+    ChannelFuture syncUninterruptibly();
+
+    @Override
+    ChannelFuture await() throws InterruptedException;
+
+    @Override
+    ChannelFuture awaitUninterruptibly();
+
+    /**
+     * Returns {@code true} if this {@link ChannelFuture} is a void future and so not allow to call any of the following methods:
+     * 如果此{@link ChannelFuture}是无效的未来，则返回{@code true}，因此不允许调用以下任何方法：
+     * <ul>
+     *     <li>{@link #addListener(GenericFutureListener)}</li>
+     *     <li>{@link #addListeners(GenericFutureListener[])}</li>
+     *     <li>{@link #await()}</li>
+     *     <li>{@link #await(long, TimeUnit)} ()}</li>
+     *     <li>{@link #await(long)} ()}</li>
+     *     <li>{@link #awaitUninterruptibly()}</li>
+     *     <li>{@link #sync()}</li>
+     *     <li>{@link #syncUninterruptibly()}</li>
+     * </ul>
+     */
+    boolean isVoid();
+}

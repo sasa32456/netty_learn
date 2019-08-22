@@ -1,0 +1,192 @@
+
+
+==================================================ChannelOutboundInvoker==============================
+public interface ChannelOutboundInvoker {
+
+    /**
+     * Request to write a message via this {@link ChannelHandlerContext} through the {@link ChannelPipeline}.
+     * This method will not request to actual flush, so be sure to call {@link #flush()}
+     * once you want to request to flush all pending data to the actual transport.
+     */
+    ChannelFuture write(Object msg);
+
+    /**
+     * Request to write a message via this {@link ChannelHandlerContext} through the {@link ChannelPipeline}.
+     * This method will not request to actual flush, so be sure to call {@link #flush()}
+     * once you want to request to flush all pending data to the actual transport.
+     */
+    ChannelFuture write(Object msg, ChannelPromise promise);
+
+    /**
+     * Request to flush all pending messages via this ChannelOutboundInvoker.
+     */
+    ChannelOutboundInvoker flush();
+
+    /**
+     * Shortcut for call {@link #write(Object, ChannelPromise)} and {@link #flush()}.
+     */
+    ChannelFuture writeAndFlush(Object msg, ChannelPromise promise);
+
+    /**
+     * Shortcut for call {@link #write(Object)} and {@link #flush()}.
+     */
+    ChannelFuture writeAndFlush(Object msg);
+    ...................
+
+}
+
+
+
+
+=========================ChannelInboundHandler================
+
+/**
+ * {@link ChannelHandler} which adds callbacks for state changes. This allows the user to hook in to state changes easily.
+ * {@link ChannelHandler}为状态更改添加回调。这允许用户容易地接入状态变化。
+ */
+public interface ChannelInboundHandler extends ChannelHandler {
+
+   /**--读取完毕
+     * Invoked when the last message read by the current read operation has been consumed by {@link #channelRead(ChannelHandlerContext, Object)}.  If {@link ChannelOption#AUTO_READ} is off, no further attempt to read an inbound data from the current {@link Channel} will be made until {@link ChannelHandlerContext#read()} is called.
+     * {@link #channelRead（ChannelHandlerContext，Object）}消耗当前读取操作读取的最后一条消息时调用。如果{@link ChannelOption＃AUTO_READ}已关闭，
+     则在调用{@link ChannelHandlerContext＃read（）}之前，不会再尝试从当前{@link Channel}读取入站数据。
+     */
+    void channelReadComplete(ChannelHandlerContext ctx) throws Exception;
+
+    /**--自定义事件
+     * Gets called if an user event was triggered.
+     */
+    void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception;
+}
+
+====================================ChannelInboundHandlerAdapter(适配器模式)======================
+/**
+* {@link ChannelInboundHandler}实现的抽象基类，它提供了所有方法的实现。
+ *
+ * <p>
+ *此实现只是将操作转发到{@link ChannelPipeline}中的下一个{@link ChannelHandler}。子类可以重写方法实现来改变它。
+ * </ p>
+ * <p>
+ *请注意，{@link #channelRead（ChannelHandlerContext，Object）}方法自动返回后，不会释放消息。
+ 如果您正在寻找一个自动释放收到消息的{@link ChannelInboundHandler}实现，请参阅{@link SimpleChannelInboundHandler}。
+ * </ p>
+ */
+public class ChannelInboundHandlerAdapter extends ChannelHandlerAdapter implements ChannelInboundHandler {
+
+    /**
+    *调用{@link ChannelHandlerContext＃fireChannelReadComplete（）}转发到{@link ChannelPipeline}中的下一个{@link ChannelInboundHandler}。
+     *
+     *子类可以覆盖此方法以更改行为。--不实现则转发实现则调用自己的
+     * /
+    @Override
+    public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
+        ctx.fireChannelReadComplete();
+    }
+
+
+}
+
+
+=========================================SimpleChannelInboundHandler<I>
+
+/**
+ * {@link ChannelInboundHandlerAdapter}，它允许显式只处理特定类型的消息。--处理泛型的数据<I>
+ *
+ *例如，这里是一个只处理{@link String}消息的实现。
+ *
+ * <pre>
+ *     public class StringHandler extends
+ *             {@link SimpleChannelInboundHandler}&lt;{@link String}&gt; {
+ *
+ *         {@code @Override}
+ *         protected void channelRead0({@link ChannelHandlerContext} ctx, {@link String} message)
+ *                 throws {@link Exception} {
+ *             System.out.println(message);
+ *         }
+ *     }
+ * </pre>
+ *
+*请注意，根据构造函数参数，它将通过将所有处理的消息传递给{@link ReferenceCountUtil＃release（Object）}来释放它们。
+在这种情况下，如果将对象传递给{@link ChannelPipeline}中的下一个处理程序，则可能需要使用{@link ReferenceCountUtil＃retain（Object）}。
+    netty自身有个引用池
+--防止垃圾回收，传到下个处理计数器不变
+ *
+ * <h3>向前兼容性通知</ h3>
+ * <p>
+ *请记住，{@ link＃channelRead0（ChannelHandlerContext，I）}将在5.0中重命名为{@code messageReceived（ChannelHandlerContext，I）}。
+ * </ p>
+ */
+public abstract class SimpleChannelInboundHandler<I> extends ChannelInboundHandlerAdapter {
+
+//模板方法设计模式--将主要过程放入子类
+ @Override
+    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        boolean release = true;
+        try {
+            if (acceptInboundMessage(msg)) {
+                @SuppressWarnings("unchecked")
+                I imsg = (I) msg;
+                channelRead0(ctx, imsg);
+            } else {
+                release = false;
+                ctx.fireChannelRead(msg);
+            }
+        } finally {
+            if (autoRelease && release) {
+                ReferenceCountUtil.release(msg);--处理计数器减一
+            }
+        }
+    }
+
+
+    /**
+     * <strong>Please keep in mind that this method will be renamed to  {@code messageReceived(ChannelHandlerContext, I)} in 5.0.</strong>
+     *
+     * Is called for each message of type {@link I}.
+     *
+     * @param ctx           the {@link ChannelHandlerContext} which this {@link SimpleChannelInboundHandler}
+     *                      belongs to
+     * @param msg           the message to handle
+     * @throws Exception    is thrown if an error occurred
+     */
+    protected abstract void channelRead0(ChannelHandlerContext ctx, I msg) throws Exception;
+}
+
+
+=================================ReferenceCountUtil======================
+/**
+ * Collection of method to handle objects that may implement {@link ReferenceCounted}.
+ */
+public final class ReferenceCountUtil {
+
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(ReferenceCountUtil.class);
+
+    static {
+        ResourceLeakDetector.addExclusions(ReferenceCountUtil.class, "touch");
+    }
+    /**
+     * Try to call {@link ReferenceCounted#release()} if the specified message implements {@link ReferenceCounted}.
+     * If the specified message doesn't implement {@link ReferenceCounted}, this method does nothing.
+     */
+    public static boolean release(Object msg) {
+        if (msg instanceof ReferenceCounted) {
+            return ((ReferenceCounted) msg).release();
+        }
+        return false;
+    }
+
+
+==========================================ReferenceCounted
+/**
+ *需要显式释放的引用计数对象。
+ * <p>
+ *当实例化新的{@link ReferenceCounted}时，它以{@code 1}的引用计数开始。
+ {@link #retain（）}增加引用计数，{@ link #release（）}减少引用计数。
+ 如果引用计数减少到{@code 0}，则将显式释放该对象，并且访问解除分配的对象通常会导致访问冲突。
+ * </ p>
+ * <p>
+ *如果实现{@link ReferenceCounted}的对象是实现{@link ReferenceCounted}的其他对象的容器，
+ 则当容器的引用计数变为0时，包含的对象也将通过{@link #release（）}释放。
+ * </ p>
+ */
+public interface ReferenceCounted {

@@ -1,0 +1,360 @@
+ChannelHandlerContext是连接ChannelHandler和ChannelContext
+Pipeline是一个容器，里面存放一个个ChannelHandlerContext对象，ChannelHandlerContext里面是一个个ChannelHandler对象
+========================================DefaultChannelPipeline==========================
+
+private static final FastThreadLocal<Map<Class<?>, String>> nameCaches =
+            new FastThreadLocal<Map<Class<?>, String>>() {
+        @Override
+        protected Map<Class<?>, String> initialValue() {
+            return new WeakHashMap<Class<?>, String>();
+        }
+    };
+
+
+   private static void checkMultiplicity(ChannelHandler handler) {
+        if (handler instanceof ChannelHandlerAdapter) {
+            ChannelHandlerAdapter h = (ChannelHandlerAdapter) handler;
+            if (!h.isSharable() && h.added) {
+                throw new ChannelPipelineException(
+                        h.getClass().getName() +
+                        " is not a @Sharable handler, so can't be added or removed multiple times.");
+            }
+            h.added = true;
+        }
+    }
+
+     private String filterName(String name, ChannelHandler handler) {
+            if (name == null) {
+                return generateName(handler);
+            }
+            checkDuplicateName(name);
+            return name;
+        }
+
+
+    private String generateName(ChannelHandler handler) {
+        Map<Class<?>, String> cache = nameCaches.get();
+        Class<?> handlerType = handler.getClass();
+        String name = cache.get(handlerType);
+        if (name == null) {
+            name = generateName0(handlerType);
+            cache.put(handlerType, name);
+        }
+
+        // It's not very likely for a user to put more than one handler of the same type, but make sure to avoid
+        // any name conflicts.  Note that we don't cache the names generated here.
+        if (context0(name) != null) {
+            String baseName = name.substring(0, name.length() - 1); // Strip the trailing '0'.
+            for (int i = 1;; i ++) {
+                String newName = baseName + i;
+                if (context0(newName) == null) {
+                    name = newName;
+                    break;
+                }
+            }
+        }
+        return name;
+    }
+
+
+     private void addLast0(AbstractChannelHandlerContext newCtx) {
+           AbstractChannelHandlerContext prev = tail.prev;
+           newCtx.prev = prev;
+           newCtx.next = tail;
+           prev.next = newCtx;
+           tail.prev = newCtx;
+       }
+============================================ChannelHandlerAdapter=============================
+/**
+ * Skeleton implementation of a {@link ChannelHandler}.
+ */
+public abstract class ChannelHandlerAdapter implements ChannelHandler {
+  /**
+     * Return {@code true} if the implementation is {@link Sharable} and so can be added to different {@link ChannelPipeline}s.
+     */
+    public boolean isSharable() {
+        /**
+        *缓存{@link Sharable}注释检测的结果以解决条件。我们使用{@link ThreadLocal}和{@link WeakHashMap}来消除易失性写/读。
+        每个{@link Thread}使用不同的{@link WeakHashMap}实例对我们来说已经足够了，而且{@link Thread}的数量无论如何都非常有限。
+         *
+         * See <a href="https://github.com/netty/netty/issues/2289">#2289</a>.
+         */
+        Class<?> clazz = getClass();
+        Map<Class<?>, Boolean> cache = InternalThreadLocalMap.get().handlerSharableCache();
+        Boolean sharable = cache.get(clazz);
+        if (sharable == null) {
+            sharable = clazz.isAnnotationPresent(Sharable.class);
+            cache.put(clazz, sharable);
+        }
+        return sharable;
+    }
+
+=====================================================FastThreadLocal================================
+/**
+* {@link ThreadLocal}的特殊变体，当从{@link FastThreadLocalThread}访问时，可以产生更高的访问性能。
+ * <p>
+ *在内部，{@link FastThreadLocal}在数组中使用常量索引，而不是使用哈希代码和哈希表来查找变量。虽然看起来非常微妙，但它比使用哈希表产生轻微的性能优势，并且在频繁访问时很有用。
+ * </ p> <p>
+ *要利用此线程局部变量，您的线程必须是{@link FastThreadLocalThread}或其子类型。默认情况下，
+ {@link DefaultThreadFactory}创建的所有线程都是{@link FastThreadLocalThread}，因为这个原因。
+ * </ p> <p>
+ *请注意，快速路径仅适用于扩展{@link FastThreadLocalThread}的线程，因为它需要一个特殊字段来存储必要的状态。
+ 任何其他类型的线程访问都会回到常规{@link ThreadLocal}。
+ * </ p>
+ *
+ * @param <V> the type of the thread-local variable
+ * @see ThreadLocal
+ */
+public class FastThreadLocal<V> {
+
+}
+
+============================================DefaultChannelHandlerContext======================
+final class DefaultChannelHandlerContext extends AbstractChannelHandlerContext {
+    //维护一个ChannelHandler
+    private final ChannelHandler handler;
+
+    DefaultChannelHandlerContext(
+            DefaultChannelPipeline pipeline, EventExecutor executor, String name, ChannelHandler handler) {
+        super(pipeline, executor, name, isInbound(handler), isOutbound(handler));
+        if (handler == null) {
+            throw new NullPointerException("handler");
+        }
+        this.handler = handler;
+    }
+
+    @Override
+    public ChannelHandler handler() {
+        return handler;
+    }
+
+    private static boolean isInbound(ChannelHandler handler) {
+        return handler instanceof ChannelInboundHandler;
+    }
+
+    private static boolean isOutbound(ChannelHandler handler) {
+        return handler instanceof ChannelOutboundHandler;
+    }
+}
+
+=======================================AbstractChannelHandlerContext===============================
+abstract class AbstractChannelHandlerContext extends DefaultAttributeMap
+        implements ChannelHandlerContext, ResourceLeakHint {
+
+        private final DefaultChannelPipeline pipeline;
+
+    //是入栈还是出
+     private final boolean inbound;
+    private final boolean outbound;
+
+    AbstractChannelHandlerContext(DefaultChannelPipeline pipeline, EventExecutor executor, String name,
+                                  boolean inbound, boolean outbound) {
+        this.name = ObjectUtil.checkNotNull(name, "name");
+        this.pipeline = pipeline;
+        this.executor = executor;
+        this.inbound = inbound;
+        this.outbound = outbound;
+        // Its ordered if its driven by the EventLoop or the given Executor is an instanceof OrderedEventExecutor.
+        ordered = executor == null || executor instanceof OrderedEventExecutor;
+    }
+
+
+
+}
+
+
+===========================================ChannelHandlerContext=======================
+  /**
+     * Return the {@link Channel} which is bound to the {@link ChannelHandlerContext}.
+     */
+    Channel channel();
+
+    /**
+       * Return the assigned {@link ChannelPipeline}
+       */
+      ChannelPipeline pipeline();
+
+
+   //子类维护一个ChannelHandler
+
+   。。。
+
+======================================================DefaultChannelPipeline
+private void callHandlerAdded0(final AbstractChannelHandlerContext ctx) {
+        try {
+            ctx.callHandlerAdded();
+        } catch (Throwable t) {
+            boolean removed = false;
+            try {
+                remove0(ctx);
+                ctx.callHandlerRemoved();
+                removed = true;
+            } catch (Throwable t2) {
+                if (logger.isWarnEnabled()) {
+                    logger.warn("Failed to remove a handler: " + ctx.name(), t2);
+                }
+            }
+
+            if (removed) {
+                fireExceptionCaught(new ChannelPipelineException(
+                        ctx.handler().getClass().getName() +
+                        ".handlerAdded() has thrown an exception; removed.", t));
+            } else {
+                fireExceptionCaught(new ChannelPipelineException(
+                        ctx.handler().getClass().getName() +
+                        ".handlerAdded() has thrown an exception; also failed to remove.", t));
+            }
+        }
+    }
+
+
+======================================================AbstractChannelHandlerContext
+  final void callHandlerAdded() throws Exception {
+        // We must call setAddComplete before calling handlerAdded. Otherwise if the handlerAdded method generates
+        // any pipeline events ctx.handler() will miss them because the state will not allow it.
+        if (setAddComplete()) {
+            handler().handlerAdded(this);
+        }
+    }
+   final boolean setAddComplete() {
+          for (;;) {
+              int oldState = handlerState;
+              if (oldState == REMOVE_COMPLETE) {
+                  return false;
+              }
+              // Ensure we never update when the handlerState is REMOVE_COMPLETE already.
+              // oldState is usually ADD_PENDING but can also be REMOVE_COMPLETE when an EventExecutor is used that is not
+              // exposing ordering guarantees.
+              if (HANDLER_STATE_UPDATER.compareAndSet(this, oldState, ADD_COMPLETE)) {
+                  return true;
+              }
+          }
+      }
+=======================ChannelHandler
+    /**
+     * Gets called after the {@link ChannelHandler} was added to the actual context and it's ready to handle events.
+     */
+    void handlerAdded(ChannelHandlerContext ctx) throws Exception;
+
+
+
+========================ChannelInitializer==============================================
+
+    /**
+    *注册{@link Channel}后将调用此方法。方法返回后，此实例将从{@link Channel}的{@link ChannelPipeline}中删除。
+     --将各种自定义的处理器放入Pipeline中，完成后删除自己
+
+     * @param ch            the {@link Channel} which was registered.
+     * @throws Exception    is thrown if an error occurs. In that case it will be handled by
+     *                      {@link #exceptionCaught(ChannelHandlerContext, Throwable)} which will by default close
+     *                      the {@link Channel}.
+     */
+    protected abstract void initChannel(C ch) throws Exception;
+
+        /**
+         * {@inheritDoc} If override this method ensure you call super!
+         */
+        @Override
+        public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
+            if (ctx.channel().isRegistered()) {
+                // This should always be true with our current DefaultChannelPipeline implementation.
+                // The good thing about calling initChannel(...) in handlerAdded(...) is that there will be no ordering
+                // surprises if a ChannelInitializer will add another ChannelInitializer. This is as all handlers
+                // will be added in the expected order.
+                if (initChannel(ctx)) {
+
+                    // We are done with init the Channel, removing the initializer now.
+                    removeState(ctx);
+                }
+            }
+        }
+
+        @Override
+        public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
+            initMap.remove(ctx);
+        }
+
+        @SuppressWarnings("unchecked")
+        private boolean initChannel(ChannelHandlerContext ctx) throws Exception {
+            if (initMap.add(ctx)) { // Guard against re-entrance.
+                try {
+                    initChannel((C) ctx.channel());
+                } catch (Throwable cause) {
+                    // Explicitly call exceptionCaught(...) as we removed the handler before calling initChannel(...).
+                    // We do so to prevent multiple calls to initChannel(...).
+                    exceptionCaught(ctx, cause);
+                } finally {
+                    ChannelPipeline pipeline = ctx.pipeline();
+                    if (pipeline.context(this) != null) {
+                        pipeline.remove(this);
+                    }
+                }
+                return true;
+            }
+            return false;
+        }
+
+
+       private void removeState(final ChannelHandlerContext ctx) {
+           // The removal may happen in an async fashion if the EventExecutor we use does something funky.
+           if (ctx.isRemoved()) {
+               initMap.remove(ctx);
+           } else {
+               // The context is not removed yet which is most likely the case because a custom EventExecutor is used.
+               // Let's schedule it on the EventExecutor to give it some more time to be completed in case it is offloaded.
+               ctx.executor().execute(new Runnable() {
+                   @Override
+                   public void run() {
+                       initMap.remove(ctx);
+                   }
+               });
+           }
+       }
+
+
+===========================ChannelPipeline=====================================
+    /**
+     * Removes the specified {@link ChannelHandler} from this pipeline.
+     *
+     * @param  handler          the {@link ChannelHandler} to remove
+     *
+     * @throws NoSuchElementException
+     *         if there's no such handler in this pipeline
+     * @throws NullPointerException
+     *         if the specified handler is {@code null}
+     */
+    ChannelPipeline remove(ChannelHandler handler);
+
+
+
+===========================DefaultChannelPipeline=====================================
+  private AbstractChannelHandlerContext remove(final AbstractChannelHandlerContext ctx) {
+        assert ctx != head && ctx != tail;
+
+        synchronized (this) {
+            remove0(ctx);
+
+            // If the registered is false it means that the channel was not registered on an eventloop yet.
+            // In this case we remove the context from the pipeline and add a task that will call
+            // ChannelHandler.handlerRemoved(...) once the channel is registered.
+            if (!registered) {
+                callHandlerCallbackLater(ctx, false);
+                return ctx;
+            }
+
+            EventExecutor executor = ctx.executor();
+            if (!executor.inEventLoop()) {
+                executor.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        callHandlerRemoved0(ctx);
+                    }
+                });
+                return ctx;
+            }
+        }
+        callHandlerRemoved0(ctx);
+        return ctx;
+    }
+
+

@@ -1,0 +1,45 @@
+========================================Future
+/**
+ * The result of an asynchronous operation.
+ */
+@SuppressWarnings("ClassNameSameAsAncestorName")
+public interface Future<V> extends java.util.concurrent.Future<V> {
+/**
+     * 等待这个未来，直到它完成，如果这个未来失败，重新抛出失败的原因。
+     */
+    Future<V> sync() throws InterruptedException;
+
+}
+
+-------------------------------
+ ChannelFuture channelFuture = serverBootstrap.bind(8899).sync();
+ 直到绑定完成才返回
+ 避免未完成
+
+在Netty中，Channel的实现一定是线程安全的，基于此，我们可以存储一个Channel的引用。并且需要在需要向远程端点发送数据时，通过这个引用来调用Channel响应的方法；
+即使当时有很多线程在使用它也不会出现多线程问题；而且，消息一定会按照顺序发送。
+
+重要结论：我们业务开发中，不要将长时间执行的任务放入EventLoop执行队列中，因为它将一直阻塞该线程所对应的Channel上的其他任务，如果我们需要进行阻塞调用或是
+其他耗时操作，那么我们就需要使用一个专门的业务线程池（EventExecutor）。
+
+通常有两种方法使用业务线程池：
+1.在ChannelHandler的回调方法中，使用自己的业务线程池
+2.借助Netty提供的向ChannelPipeline添加ChannelHandler时调用的addLast方法来传递EventExecutor。
+
+说明：默认情况下（调用addLast（Handler）），ChannelHandler中的回调方法都是由I/O线程所执行，如果调用了ChannelPipeline addLast
+（EventExecutorGroup group，ChannelHandler... handler）方法，那么ChannelHandler中的回调将由参数中的group线程组来执行
+
+
+===========================================ChannelPipeline============================
+    /**
+     * Inserts {@link ChannelHandler}s at the last position of this pipeline.
+     *
+     * @param group     the {@link EventExecutorGroup} which will be used to execute the {@link ChannelHandler}s methods.
+     * @param handlers  the handlers to insert last
+     *
+     */
+    ChannelPipeline addLast(EventExecutorGroup group, ChannelHandler... handlers);
+        //EventExecutorGroup是EventLoopGroup父接口
+
+
+

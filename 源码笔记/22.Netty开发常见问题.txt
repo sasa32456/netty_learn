@@ -1,0 +1,19 @@
+在Netty中有两种发送消息的方式，直接写到Channel中或是写到关联的ChannelHandlerContext中。前一种消息会从ChannelPipeline的末尾开始流动
+后一种消息会从ChannelPipeline的下一个ChannelHandler开始流动
+
+结论：
+1.ChannelHandlerContext与ChannelHandler的绑定关系永远不会发生改变，因此对其缓存不会有问题
+2.对于Channel的同名方法来说，ChannelHandlerContext的方法会产生更短的事件流，所以我们应该在可能的情况下利用这个特性来提升效能
+
+     @Override
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        ctx.writeAndFlush("来自于客户端的问候");
+        //再次发起服务
+        Bootstrap bootstrap = new Bootstrap();
+        bootstrap.channel(NioSocketChannel.class).handler(new ChannelInitializer<SocketChannel>() {
+            @Override
+            protected void initChannel(SocketChannel ch) throws Exception {
+
+            }
+        }).connect("localhost",8899).sync().channel().closeFuture().sync();
+    }

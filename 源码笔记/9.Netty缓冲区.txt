@@ -1,0 +1,459 @@
+============================================NioServerSocketChannel===================================
+public class NioServerSocketChannel extends AbstractNioMessageChannel
+                             implements io.netty.channel.socket.ServerSocketChannel {
+private final ServerSocketChannelConfig config;
+。。。
+}
+
+===============================================ServerSocketChannelConfig========================================
+/**
+ * A {@link ChannelConfig} for a {@link ServerSocketChannel}.
+ *
+ * <h3>Available options</h3>
+ *
+ * In addition to the options provided by {@link ChannelConfig},
+ * {@link ServerSocketChannelConfig} allows the following options in the
+ * option map:
+ *
+ * <table border="1" cellspacing="0" cellpadding="6">
+ * <tr>
+ * <th>Name</th><th>Associated setter method</th>
+ * </tr><tr>
+ * <td>{@code "backlog"}</td><td>{@link #setBacklog(int)}</td>
+ * </tr><tr>
+ * <td>{@code "reuseAddress"}</td><td>{@link #setReuseAddress(boolean)}</td>
+ * </tr><tr>
+ * <td>{@code "receiveBufferSize"}</td><td>{@link #setReceiveBufferSize(int)}</td>
+ * </tr>
+ * </table>
+ */
+public interface ServerSocketChannelConfig extends ChannelConfig {
+。。。
+}
+
+
+===============================================DefaultServerSocketChannelConfig========================================
+/**
+ * The default {@link ServerSocketChannelConfig} implementation.
+ */
+public class DefaultServerSocketChannelConfig extends DefaultChannelConfig
+                                              implements ServerSocketChannelConfig {
+
+===============================================DefaultChannelConfig========================================
+
+/**
+ * The default {@link ChannelConfig} implementation.
+ */
+public class DefaultChannelConfig implements ChannelConfig {
+
+===============================================AdaptiveRecvByteBufAllocator========================================
+
+/**
+* {@link RecvByteBufAllocator}自动增加和减少反馈时预测的缓冲区大小。
+ * <p>
+ *如果先前的读取完全填充了分配的缓冲区，它会逐渐增加预期的可读字节数。如果读取操作不能连续两次填充一定量的分配缓冲区，则逐渐减少预期的可读字节数。否则，它会继续返回相同的预测。
+ * /
+public class AdaptiveRecvByteBufAllocator extends DefaultMaxMessagesRecvByteBufAllocator {
+
+   static final int DEFAULT_MINIMUM = 64;
+    static final int DEFAULT_INITIAL = 1024;
+    static final int DEFAULT_MAXIMUM = 65536;
+
+    private static final int INDEX_INCREMENT = 4;
+    private static final int INDEX_DECREMENT = 1;
+
+    private static final int[] SIZE_TABLE;
+
+/**设置分配缓冲区**/
+    static {
+        List<Integer> sizeTable = new ArrayList<Integer>();
+        for (int i = 16; i < 512; i += 16) {
+            sizeTable.add(i);
+        }
+
+        for (int i = 512; i > 0; i <<= 1) {
+            sizeTable.add(i);
+        }
+
+        SIZE_TABLE = new int[sizeTable.size()];
+        for (int i = 0; i < SIZE_TABLE.length; i ++) {
+            SIZE_TABLE[i] = sizeTable.get(i);
+        }
+    }
+
+    /**
+     * @deprecated There is state for {@link #maxMessagesPerRead()} which is typically based upon channel type.
+     */
+    @Deprecated
+    public static final AdaptiveRecvByteBufAllocator DEFAULT = new AdaptiveRecvByteBufAllocator();
+
+    private static int getSizeTableIndex(final int size) {
+        for (int low = 0, high = SIZE_TABLE.length - 1;;) {
+            if (high < low) {
+                return low;
+            }
+            if (high == low) {
+                return high;
+            }
+
+            int mid = low + high >>> 1;
+            int a = SIZE_TABLE[mid];
+            int b = SIZE_TABLE[mid + 1];
+            if (size > b) {
+                low = mid + 1;
+            } else if (size < a) {
+                high = mid - 1;
+            } else if (size == a) {
+                return mid;
+            } else {
+                return mid + 1;
+            }
+        }
+    }
+
+    private final class HandleImpl extends MaxMessageHandle {
+        private final int minIndex;
+        private final int maxIndex;
+        private int index;
+        private int nextReceiveBufferSize;
+        private boolean decreaseNow;
+
+        HandleImpl(int minIndex, int maxIndex, int initial) {
+            this.minIndex = minIndex;
+            this.maxIndex = maxIndex;
+
+            index = getSizeTableIndex(initial);
+            nextReceiveBufferSize = SIZE_TABLE[index];
+        }
+
+        @Override
+        public void lastBytesRead(int bytes) {
+            // If we read as much as we asked for we should check if we need to ramp up the size of our next guess.
+            // This helps adjust more quickly when large amounts of data is pending and can avoid going back to
+            // the selector to check for more data. Going back to the selector can add significant latency for large
+            // data transfers.
+            if (bytes == attemptedBytesRead()) {
+                record(bytes);
+            }
+            super.lastBytesRead(bytes);
+        }
+
+        @Override
+        public int guess() {
+            return nextReceiveBufferSize;
+        }
+
+        private void record(int actualReadBytes) {
+            if (actualReadBytes <= SIZE_TABLE[max(0, index - INDEX_DECREMENT - 1)]) {
+                if (decreaseNow) {
+                    index = max(index - INDEX_DECREMENT, minIndex);
+                    nextReceiveBufferSize = SIZE_TABLE[index];
+                    decreaseNow = false;
+                } else {
+                    decreaseNow = true;
+                }
+            } else if (actualReadBytes >= nextReceiveBufferSize) {
+                index = min(index + INDEX_INCREMENT, maxIndex);
+                nextReceiveBufferSize = SIZE_TABLE[index];
+                decreaseNow = false;
+            }
+        }
+
+        @Override
+        public void readComplete() {
+            record(totalBytesRead());
+        }
+    }
+
+    private final int minIndex;
+    private final int maxIndex;
+    private final int initial;
+
+    /**
+     *使用默认参数创建新的预测变量。使用默认参数时，预期的缓冲区大小从{@code 1024}开始，不会低于{@code 64}，并且不会超过{@code 65536}。
+     */
+    public AdaptiveRecvByteBufAllocator() {
+        this(DEFAULT_MINIMUM, DEFAULT_INITIAL, DEFAULT_MAXIMUM);
+    }
+
+    /**
+     * Creates a new predictor with the specified parameters.
+     *
+     * @param minimum  the inclusive lower bound of the expected buffer size
+     * @param initial  the initial buffer size when no feed back was received
+     * @param maximum  the inclusive upper bound of the expected buffer size
+     */
+    public AdaptiveRecvByteBufAllocator(int minimum, int initial, int maximum) {
+        checkPositive(minimum, "minimum");
+        if (initial < minimum) {
+            throw new IllegalArgumentException("initial: " + initial);
+        }
+        if (maximum < initial) {
+            throw new IllegalArgumentException("maximum: " + maximum);
+        }
+
+        int minIndex = getSizeTableIndex(minimum);
+        if (SIZE_TABLE[minIndex] < minimum) {
+            this.minIndex = minIndex + 1;
+        } else {
+            this.minIndex = minIndex;
+        }
+
+        int maxIndex = getSizeTableIndex(maximum);
+        if (SIZE_TABLE[maxIndex] > maximum) {
+            this.maxIndex = maxIndex - 1;
+        } else {
+            this.maxIndex = maxIndex;
+        }
+
+        this.initial = initial;
+    }
+
+    @SuppressWarnings("deprecation")
+    @Override
+    public Handle newHandle() {
+        return new HandleImpl(minIndex, maxIndex, initial);
+    }
+
+    @Override
+    public AdaptiveRecvByteBufAllocator respectMaybeMoreData(boolean respectMaybeMoreData) {
+        super.respectMaybeMoreData(respectMaybeMoreData);
+        return this;
+    }
+}
+
+===============================================DefaultMaxMessagesRecvByteBufAllocator========================================
+
+/**
+ * Default implementation of {@link MaxMessagesRecvByteBufAllocator} which respects {@link ChannelConfig#isAutoRead()}
+ * and also prevents overflow.
+ */
+public abstract class DefaultMaxMessagesRecvByteBufAllocator implements MaxMessagesRecvByteBufAllocator {
+    private volatile int maxMessagesPerRead;
+    private volatile boolean respectMaybeMoreData = true;
+
+
+       @Override
+        public ByteBuf allocate(ByteBufAllocator alloc) {
+            return alloc.ioBuffer(guess());
+        }
+
+}
+
+
+===============================================AbstractByteBufAllocator========================================
+
+/**
+ * Skeletal {@link ByteBufAllocator} implementation to extend.
+ */
+public abstract class AbstractByteBufAllocator implements ByteBufAllocator {
+    static final int DEFAULT_INITIAL_CAPACITY = 256;
+    static final int DEFAULT_MAX_CAPACITY = Integer.MAX_VALUE;
+    static final int DEFAULT_MAX_COMPONENTS = 16;
+    static final int CALCULATE_THRESHOLD = 1048576 * 4; // 4 MiB page
+
+    static {
+        ResourceLeakDetector.addExclusions(AbstractByteBufAllocator.class, "toLeakAwareBuffer");
+    }
+
+
+   @Override
+    public ByteBuf ioBuffer(int initialCapacity) {
+        if (PlatformDependent.hasUnsafe()) {
+            return directBuffer(initialCapacity);//堆内
+        }
+        return heapBuffer(initialCapacity);//堆外
+    }
+
+        @Override
+        public ByteBuf directBuffer(int initialCapacity) {
+            return directBuffer(initialCapacity, DEFAULT_MAX_CAPACITY);
+        }
+
+。。。
+}
+===============================================PlatformDependent========================================
+/**
+ * Utility that detects various properties specific to the current runtime environment, such as Java version and the availability of the {@code sun.misc.Unsafe} object.
+ * <p>
+ * You can disable the use of {@code sun.misc.Unsafe} if you specify the system property <strong>io.netty.noUnsafe</strong>.
+ */
+public final class PlatformDependent {
+
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(PlatformDependent.class);
+
+    private static final Pattern MAX_DIRECT_MEMORY_SIZE_ARG_PATTERN = Pattern.compile(
+            "\\s*-XX:MaxDirectMemorySize\\s*=\\s*([0-9]+)\\s*([kKmMgG]?)\\s*$");
+
+    private static final boolean IS_WINDOWS = isWindows0();
+    private static final boolean IS_OSX = isOsx0();
+    private static final boolean IS_J9_JVM = isJ9Jvm0();
+
+    private static final boolean MAYBE_SUPER_USER;
+
+    private static final boolean CAN_ENABLE_TCP_NODELAY_BY_DEFAULT = !isAndroid();
+
+    private static final Throwable UNSAFE_UNAVAILABILITY_CAUSE = unsafeUnavailabilityCause0();
+    private static final boolean DIRECT_BUFFER_PREFERRED;
+    private static final long MAX_DIRECT_MEMORY = maxDirectMemory0();
+
+    private static final int MPSC_CHUNK_SIZE =  1024;
+    private static final int MIN_MAX_MPSC_CAPACITY =  MPSC_CHUNK_SIZE * 2;
+    private static final int MAX_ALLOWED_MPSC_CAPACITY = Pow2.MAX_POW2;
+
+    private static final long BYTE_ARRAY_BASE_OFFSET = byteArrayBaseOffset0();
+
+    private static final File TMPDIR = tmpdir0();
+
+    private static final int BIT_MODE = bitMode0();
+    private static final String NORMALIZED_ARCH = normalizeArch(SystemPropertyUtil.get("os.arch", ""));
+    private static final String NORMALIZED_OS = normalizeOs(SystemPropertyUtil.get("os.name", ""));
+
+    private static final int ADDRESS_SIZE = addressSize0();
+    private static final boolean USE_DIRECT_BUFFER_NO_CLEANER;
+    private static final AtomicLong DIRECT_MEMORY_COUNTER;
+    private static final long DIRECT_MEMORY_LIMIT;
+    private static final ThreadLocalRandomProvider RANDOM_PROVIDER;
+    private static final Cleaner CLEANER;
+    private static final int UNINITIALIZED_ARRAY_ALLOCATION_THRESHOLD;
+
+    public static final boolean BIG_ENDIAN_NATIVE_ORDER = ByteOrder.nativeOrder() == ByteOrder.BIG_ENDIAN;
+
+    private static final Cleaner NOOP = new Cleaner() {
+        @Override
+        public void freeDirectBuffer(ByteBuffer buffer) {
+            // NOOP
+        }
+    };
+
+    static {
+        if (javaVersion() >= 7) {
+            RANDOM_PROVIDER = new ThreadLocalRandomProvider() {
+                @Override
+                public Random current() {
+                    return java.util.concurrent.ThreadLocalRandom.current();
+                }
+            };
+        } else {
+            RANDOM_PROVIDER = new ThreadLocalRandomProvider() {
+                @Override
+                public Random current() {
+                    return ThreadLocalRandom.current();
+                }
+            };
+        }
+
+        // Here is how the system property is used:
+        //
+        // * <  0  - Don't use cleaner, and inherit max direct memory from java. In this case the
+        //           "practical max direct memory" would be 2 * max memory as defined by the JDK.
+        // * == 0  - Use cleaner, Netty will not enforce max memory, and instead will defer to JDK.
+        // * >  0  - Don't use cleaner. This will limit Netty's total direct memory
+        //           (note: that JDK's direct memory limit is independent of this).
+        long maxDirectMemory = SystemPropertyUtil.getLong("io.netty.maxDirectMemory", -1);
+
+        if (maxDirectMemory == 0 || !hasUnsafe() || !PlatformDependent0.hasDirectBufferNoCleanerConstructor()) {
+            USE_DIRECT_BUFFER_NO_CLEANER = false;
+            DIRECT_MEMORY_COUNTER = null;
+        } else {
+            USE_DIRECT_BUFFER_NO_CLEANER = true;
+            if (maxDirectMemory < 0) {
+                maxDirectMemory = MAX_DIRECT_MEMORY;
+                if (maxDirectMemory <= 0) {
+                    DIRECT_MEMORY_COUNTER = null;
+                } else {
+                    DIRECT_MEMORY_COUNTER = new AtomicLong();
+                }
+            } else {
+                DIRECT_MEMORY_COUNTER = new AtomicLong();
+            }
+        }
+        logger.debug("-Dio.netty.maxDirectMemory: {} bytes", maxDirectMemory);
+        DIRECT_MEMORY_LIMIT = maxDirectMemory >= 1 ? maxDirectMemory : MAX_DIRECT_MEMORY;
+
+        int tryAllocateUninitializedArray =
+                SystemPropertyUtil.getInt("io.netty.uninitializedArrayAllocationThreshold", 1024);
+        UNINITIALIZED_ARRAY_ALLOCATION_THRESHOLD = javaVersion() >= 9 && PlatformDependent0.hasAllocateArrayMethod() ?
+                tryAllocateUninitializedArray : -1;
+        logger.debug("-Dio.netty.uninitializedArrayAllocationThreshold: {}", UNINITIALIZED_ARRAY_ALLOCATION_THRESHOLD);
+
+        MAYBE_SUPER_USER = maybeSuperUser0();
+
+        if (!isAndroid()) {
+            // only direct to method if we are not running on android.
+            // See https://github.com/netty/netty/issues/2604
+            if (javaVersion() >= 9) {
+                CLEANER = CleanerJava9.isSupported() ? new CleanerJava9() : NOOP;
+            } else {
+                CLEANER = CleanerJava6.isSupported() ? new CleanerJava6() : NOOP;
+            }
+        } else {
+            CLEANER = NOOP;
+        }
+
+        // We should always prefer direct buffers by default if we can use a Cleaner to release direct buffers.
+        DIRECT_BUFFER_PREFERRED = CLEANER != NOOP
+                                  && !SystemPropertyUtil.getBoolean("io.netty.noPreferDirect", false);
+        if (logger.isDebugEnabled()) {
+            logger.debug("-Dio.netty.noPreferDirect: {}", !DIRECT_BUFFER_PREFERRED);
+        }
+
+        /*
+         * We do not want to log this message if unsafe is explicitly disabled. Do not remove the explicit no unsafe
+         * guard.
+         */
+        if (CLEANER == NOOP && !PlatformDependent0.isExplicitNoUnsafe()) {
+            logger.info(
+                    "Your platform does not provide complete low-level API for accessing direct buffers reliably. " +
+                    "Unless explicitly requested, heap buffer will always be preferred to avoid potential system " +
+                    "instability.");
+        }
+    }
+    public static boolean hasUnsafe() {
+        return UNSAFE_UNAVAILABILITY_CAUSE == null;
+    }
+
+    private static Throwable unsafeUnavailabilityCause0() {
+        if (isAndroid()) {
+            logger.debug("sun.misc.Unsafe: unavailable (Android)");
+            return new UnsupportedOperationException("sun.misc.Unsafe: unavailable (Android)");
+        }
+        Throwable cause = PlatformDependent0.getUnsafeUnavailabilityCause();
+        if (cause != null) {
+            return cause;
+        }
+
+        try {
+            boolean hasUnsafe = PlatformDependent0.hasUnsafe();
+            logger.debug("sun.misc.Unsafe: {}", hasUnsafe ? "available" : "unavailable");
+            return hasUnsafe ? null : PlatformDependent0.getUnsafeUnavailabilityCause();
+        } catch (Throwable t) {
+            logger.trace("Could not determine if Unsafe is available", t);
+            // Probably failed to initialize PlatformDependent0.
+            return new UnsupportedOperationException("Could not determine if Unsafe is available", t);
+        }
+    }
+===============================================一百万个跳转以后 UnpooledUnsafeDirectByteBuf========================================
+/**
+ * A NIO {@link ByteBuffer} based buffer. It is recommended to use
+ * {@link UnpooledByteBufAllocator#directBuffer(int, int)}, {@link Unpooled#directBuffer(int)} and
+ * {@link Unpooled#wrappedBuffer(ByteBuffer)} instead of calling the constructor explicitly.}
+ */
+public class UnpooledUnsafeDirectByteBuf extends AbstractReferenceCountedByteBuf {
+
+    private final ByteBufAllocator alloc;
+
+    private ByteBuffer tmpNioBuf;
+    private int capacity;
+    private boolean doNotFree;
+    ByteBuffer buffer;
+    long memoryAddress;
+
+    。。。。。。。。。。。。。。。。。。。
+    /**
+     * Allocate a new direct {@link ByteBuffer} with the given initialCapacity.
+     */
+    protected ByteBuffer allocateDirect(int initialCapacity) {
+        return ByteBuffer.allocateDirect(initialCapacity);
+    }
+。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。

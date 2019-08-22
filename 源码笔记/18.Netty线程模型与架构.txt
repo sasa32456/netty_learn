@@ -1,0 +1,344 @@
+======================================Channel===================
+==============================Unsafe
+ /**
+     *<em>不安全的</ em>操作，应该<em>永远不会从用户代码中调用</ em>。这些方法仅用于实现实际传输，必须从I / O线程调用，但以下方法除外：
+     * <ul>
+     * <li> {@ link #localAddress（）} </ li>
+     * <li> {@ link #remoteAddress（）} </ li>
+     * <li> {@ link #closeForcibly（）} </ li>
+     * <li> {@ link #register（EventLoop，ChannelPromise）} </ li>
+     * <li> {@ link #deregister（ChannelPromise）} </ li>
+     * <li> {@ link #voidPromise（）} </ li>
+     * </ ul>
+     */
+    interface Unsafe {
+
+         /**
+             * 注册{@link ChannelPromise}的{@link频道}，并在注册完成后通知{@link ChannelFuture}。
+             */
+            void register(EventLoop eventLoop, ChannelPromise promise);
+
+
+    }
+
+
+==================================AbstractNioChannel==================
+/**
+ * Abstract base class for {@link Channel} implementations which use a Selector based approach.
+ */
+public abstract class AbstractNioChannel extends AbstractChannel {
+    @Override
+    public NioUnsafe unsafe() {
+        return (NioUnsafe) super.unsafe();
+    }
+
+
+
+
+=============================================AbstractChannel==========================
+/**
+ * A skeletal {@link Channel} implementation.
+ * 骨干{@link Channel}实现。
+ */
+public abstract class AbstractChannel extends DefaultAttributeMap implements Channel {
+
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(AbstractChannel.class);
+
+    private static final ClosedChannelException ENSURE_OPEN_CLOSED_CHANNEL_EXCEPTION = ThrowableUtil.unknownStackTrace(
+            new ExtendedClosedChannelException(null), AbstractUnsafe.class, "ensureOpen(...)");
+    private static final ClosedChannelException CLOSE_CLOSED_CHANNEL_EXCEPTION = ThrowableUtil.unknownStackTrace(
+            new ClosedChannelException(), AbstractUnsafe.class, "close(...)");
+    private static final ClosedChannelException WRITE_CLOSED_CHANNEL_EXCEPTION = ThrowableUtil.unknownStackTrace(
+            new ExtendedClosedChannelException(null), AbstractUnsafe.class, "write(...)");
+    private static final ClosedChannelException FLUSH0_CLOSED_CHANNEL_EXCEPTION = ThrowableUtil.unknownStackTrace(
+            new ExtendedClosedChannelException(null), AbstractUnsafe.class, "flush0()");
+    private static final NotYetConnectedException FLUSH0_NOT_YET_CONNECTED_EXCEPTION = ThrowableUtil.unknownStackTrace(
+            new NotYetConnectedException(), AbstractUnsafe.class, "flush0()");
+
+    private final Channel parent;
+    private final ChannelId id;
+    private final Unsafe unsafe;
+    private final DefaultChannelPipeline pipeline;
+    private final VoidChannelPromise unsafeVoidPromise = new VoidChannelPromise(this, false);
+    private final CloseFuture closeFuture = new CloseFuture(this);
+
+    private volatile SocketAddress localAddress;
+    private volatile SocketAddress remoteAddress;
+    private volatile EventLoop eventLoop;
+    private volatile boolean registered;
+    private boolean closeInitiated;
+    private Throwable initialCloseCause;
+
+    /** Cache for the string representation of this channel */
+    private boolean strValActive;
+    private String strVal;
+
+    /**
+     * Creates a new instance.
+     *
+     * @param parent
+     *        the parent of this channel. {@code null} if there's no parent.
+     */
+    protected AbstractChannel(Channel parent) {
+        this.parent = parent;
+        id = newId();
+        unsafe = newUnsafe();
+        pipeline = newChannelPipeline();
+    }
+
+ /**
+     * Create a new {@link AbstractUnsafe} instance which will be used for the life-time of the {@link Channel}
+     */
+    protected abstract AbstractUnsafe newUnsafe();
+
+
+       @Override
+       public Unsafe unsafe() {
+           return unsafe;
+       }
+
+ @Override
+        public final void register(EventLoop eventLoop, final ChannelPromise promise) {
+            if (eventLoop == null) {
+                throw new NullPointerException("eventLoop");
+            }
+            if (isRegistered()) {
+                promise.setFailure(new IllegalStateException("registered to an event loop already"));
+                return;
+            }
+            if (!isCompatible(eventLoop)) {
+                promise.setFailure(
+                        new IllegalStateException("incompatible event loop type: " + eventLoop.getClass().getName()));
+                return;
+            }
+
+            AbstractChannel.this.eventLoop = eventLoop;
+
+            if (eventLoop.inEventLoop()) {
+                register0(promise);
+            } else {
+                try {
+                    eventLoop.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            register0(promise);
+                        }
+                    });
+                } catch (Throwable t) {
+                    logger.warn(
+                            "Force-closing a channel whose registration task was not accepted by an event loop: {}",
+                            AbstractChannel.this, t);
+                    closeForcibly();
+                    closeFuture.setClosed();
+                    safeSetFailure(promise, t);
+                }
+            }
+        }
+=========================================AbstractNioMessageChannel
+/**
+ * {@link AbstractNioChannel} base class for {@link Channel}s that operate on messages.
+ */
+public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
+    boolean inputShutdown;
+
+    @Override
+    protected AbstractNioUnsafe newUnsafe() {
+        return new NioMessageUnsafe();
+    }
+
+
+
+    private final class NioMessageUnsafe extends AbstractNioUnsafe {
+
+        private final List<Object> readBuf = new ArrayList<Object>();
+
+        @Override
+        public void read() {
+            assert eventLoop().inEventLoop();
+            final ChannelConfig config = config();
+            final ChannelPipeline pipeline = pipeline();
+            final RecvByteBufAllocator.Handle allocHandle = unsafe().recvBufAllocHandle();
+            allocHandle.reset(config);
+
+            boolean closed = false;
+            Throwable exception = null;
+            try {
+                try {
+                    do {
+                        int localRead = doReadMessages(readBuf);
+                        if (localRead == 0) {
+                            break;
+                        }
+                        if (localRead < 0) {
+                            closed = true;
+                            break;
+                        }
+
+                        allocHandle.incMessagesRead(localRead);
+                    } while (allocHandle.continueReading());
+                } catch (Throwable t) {
+                    exception = t;
+                }
+
+                int size = readBuf.size();
+                for (int i = 0; i < size; i ++) {
+                    readPending = false;
+                    pipeline.fireChannelRead(readBuf.get(i));
+                }
+                readBuf.clear();
+                allocHandle.readComplete();
+                pipeline.fireChannelReadComplete();
+
+                if (exception != null) {
+                    closed = closeOnReadError(exception);
+
+                    pipeline.fireExceptionCaught(exception);
+                }
+
+                if (closed) {
+                    inputShutdown = true;
+                    if (isOpen()) {
+                        close(voidPromise());
+                    }
+                }
+            } finally {
+                // Check if there is a readPending which was not processed yet.
+                // This could be for two reasons:
+                // * The user called Channel.read() or ChannelHandlerContext.read() in channelRead(...) method
+                // * The user called Channel.read() or ChannelHandlerContext.read() in channelReadComplete(...) method
+                //
+                // See https://github.com/netty/netty/issues/2254
+                if (!readPending && !config.isAutoRead()) {
+                    removeReadOp();
+                }
+            }
+        }
+    }
+=============================================EventExecutor
+/**
+ * {@link EventExecutor}是一个特殊的{@link EventExecutorGroup}，它带有一些方便的方法来查看在事件循环中是否执行了{@link Thread}。
+ 除此之外，它还扩展了{@link EventExecutorGroup}以允许访问方法的通用方法。
+ *
+ */
+public interface EventExecutor extends EventExecutorGroup {
+    /**
+     * Calls {@link #inEventLoop(Thread)} with {@link Thread#currentThread()} as argument
+     * 使用{@link Thread＃currentThread（）}作为参数调用{@link #inEventLoop（Thread）}
+     */
+    boolean inEventLoop();
+
+
+
+    /**
+     * Return {@code true} if the given {@link Thread} is executed in the event loop, {@code false} otherwise.
+*如果在事件循环中执行给定的{@link Thread}，则返回{@code true}，否则返回{@code false}。     */
+    boolean inEventLoop(Thread thread);
+
+===============================================AbstractEventExecutor
+/**
+ * Abstract base class for {@link EventExecutor} implementations.
+ */
+public abstract class AbstractEventExecutor extends AbstractExecutorService implements EventExecutor {
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(AbstractEventExecutor.class);
+
+    static final long DEFAULT_SHUTDOWN_QUIET_PERIOD = 2;
+    static final long DEFAULT_SHUTDOWN_TIMEOUT = 15;
+
+    private final EventExecutorGroup parent;
+    private final Collection<EventExecutor> selfCollection = Collections.<EventExecutor>singleton(this);
+
+    protected AbstractEventExecutor() {
+        this(null);
+    }
+
+    protected AbstractEventExecutor(EventExecutorGroup parent) {
+        this.parent = parent;
+    }
+    @Override
+    public boolean inEventLoop() {
+        return inEventLoop(Thread.currentThread());
+    }
+
+
+
+
+======================================================SingleThreadEventExecutor
+    @Override
+    public boolean inEventLoop(Thread thread) {
+        return thread == this.thread;
+    }
+
+
+=================================================AbstractChannel
+ private void register0(ChannelPromise promise) {
+            try {
+                // check if the channel is still open as it could be closed in the mean time when the register
+                // call was outside of the eventLoop
+                if (!promise.setUncancellable() || !ensureOpen(promise)) {
+                    return;
+                }
+                boolean firstRegistration = neverRegistered;
+                doRegister();
+                neverRegistered = false;
+                registered = true;
+
+                // Ensure we call handlerAdded(...) before we actually notify the promise. This is needed as the
+                // user may already fire events through the pipeline in the ChannelFutureListener.
+                pipeline.invokeHandlerAddedIfNeeded();
+
+                safeSetSuccess(promise);
+                pipeline.fireChannelRegistered();
+                // Only fire a channelActive if the channel has never been registered. This prevents firing
+                // multiple channel actives if the channel is deregistered and re-registered.
+                if (isActive()) {
+                    if (firstRegistration) {
+                        pipeline.fireChannelActive();
+                    } else if (config().isAutoRead()) {
+                        // This channel was registered before and autoRead() is set. This means we need to begin read
+                        // again so that we process inbound data.
+                        //
+                        // See https://github.com/netty/netty/issues/4805
+                        beginRead();
+                    }
+                }
+            } catch (Throwable t) {
+                // Close the channel directly to avoid FD leak.
+                closeForcibly();
+                closeFuture.setClosed();
+                safeSetFailure(promise, t);
+            }
+        }
+==========================================================AbstractNioChannel
+ @Override
+    protected void doRegister() throws Exception {
+        boolean selected = false;
+        for (;;) {
+            try {
+                selectionKey = javaChannel().register(eventLoop().unwrappedSelector(), 0, this);
+                return;
+            } catch (CancelledKeyException e) {
+                if (!selected) {
+                    // Force the Selector to select now as the "canceled" SelectionKey may still be
+                    // cached and not removed because no Select.select(..) operation was called yet.
+                    eventLoop().selectNow();
+                    selected = true;
+                } else {
+                    // We forced a select operation on the selector before but the SelectionKey is still cached
+                    // for whatever reason. JDK bug ?
+                    throw e;
+                }
+            }
+        }
+    }
+
+
+
+
+
+
+
+1.一个EventLoopGroup当中包含一个或多个EventLoop
+2.一个EventLoop在它的整个生命周期中只会与唯一一个Thread绑定
+3.所有由EventLoop所处理的各种I/O事件都将在它所关联的Thread上处理
+4.有个Channel在它的整个生命周期中只会注册到一个EventLoop上
+5.一个EventLoop在运行过程中，会被分配到一个或多个Channel。

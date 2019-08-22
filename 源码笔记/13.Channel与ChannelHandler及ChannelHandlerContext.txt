@@ -1,0 +1,213 @@
+=====================================DefaultChannelConfig==========================
+/**
+ * The default {@link ChannelConfig} implementation.
+ */
+public class DefaultChannelConfig implements ChannelConfig {
+
+ @Override
+    @SuppressWarnings("deprecation")
+    public <T> boolean setOption(ChannelOption<T> option, T value) {
+        validate(option, value);
+
+        if (option == CONNECT_TIMEOUT_MILLIS) {
+            setConnectTimeoutMillis((Integer) value);
+        } else if (option == MAX_MESSAGES_PER_READ) {
+            setMaxMessagesPerRead((Integer) value);
+        } else if (option == WRITE_SPIN_COUNT) {
+            setWriteSpinCount((Integer) value);
+        } else if (option == ALLOCATOR) {
+            setAllocator((ByteBufAllocator) value);
+        } else if (option == RCVBUF_ALLOCATOR) {
+            setRecvByteBufAllocator((RecvByteBufAllocator) value);
+        } else if (option == AUTO_READ) {
+            setAutoRead((Boolean) value);
+        } else if (option == AUTO_CLOSE) {
+            setAutoClose((Boolean) value);
+        } else if (option == WRITE_BUFFER_HIGH_WATER_MARK) {
+            setWriteBufferHighWaterMark((Integer) value);
+        } else if (option == WRITE_BUFFER_LOW_WATER_MARK) {
+            setWriteBufferLowWaterMark((Integer) value);
+        } else if (option == WRITE_BUFFER_WATER_MARK) {
+            setWriteBufferWaterMark((WriteBufferWaterMark) value);
+        } else if (option == MESSAGE_SIZE_ESTIMATOR) {
+            setMessageSizeEstimator((MessageSizeEstimator) value);
+        } else if (option == SINGLE_EVENTEXECUTOR_PER_GROUP) {
+            setPinEventExecutorPerGroup((Boolean) value);
+        } else {
+            return false;
+        }
+
+        return true;
+    }
+
+}
+
+===========================ChannelInitializer===============================
+/**
+ *一个特殊的{@link ChannelInboundHandler}，它提供了一种在{@link EventLoop}注册后初始化{@link Channel}的简便方法。
+ *
+ *实现最常用于{@link Bootstrap＃handler（ChannelHandler）}，{@ link ServerBootstrap＃handler（ChannelHandler）}
+ 和{@link ServerBootstrap #childHandler（ChannelHandler）}的上下文来设置{@link ChannelPipeline}一个{@link Channel}。
+ *
+ * <pre>
+ *
+ * public class MyChannelInitializer extends {@link ChannelInitializer} {
+ *     public void initChannel({@link Channel} channel) {
+ *         channel.pipeline().addLast("myHandler", new MyHandler());
+ *     }
+ * }
+ *
+ * {@link ServerBootstrap} bootstrap = ...;
+ * ...
+ * bootstrap.childHandler(new MyChannelInitializer());
+ * ...
+ * </pre>
+ * 请注意，此类标记为{@link Sharable}，因此实现必须安全才能重复使用。
+ *
+ * @param <C>   A sub-type of {@link Channel}
+ */
+@Sharable
+public abstract class ChannelInitializer<C extends Channel> extends ChannelInboundHandlerAdapter {
+
+
+
+
+}
+=====================================
+/**
+ * The default {@link ChannelPipeline} implementation.  It is usually created by a {@link Channel} implementation when the {@link Channel} is created.
+ */
+public class DefaultChannelPipeline implements ChannelPipeline {
+
+
+    @Override
+    public final ChannelPipeline addLast(EventExecutorGroup group, String name, ChannelHandler handler) {
+        final AbstractChannelHandlerContext newCtx;
+        synchronized (this) {
+            checkMultiplicity(handler);
+
+            newCtx = newContext(group, filterName(name, handler), handler);
+
+            addLast0(newCtx);
+
+            // If the registered is false it means that the channel was not registered on an eventLoop yet.
+            // In this case we add the context to the pipeline and add a task that will call
+            // ChannelHandler.handlerAdded(...) once the channel is registered.
+            if (!registered) {
+                newCtx.setAddPending();
+                callHandlerCallbackLater(newCtx, true);
+                return this;
+            }
+
+            EventExecutor executor = newCtx.executor();
+            if (!executor.inEventLoop()) {
+                callHandlerAddedInEventLoop(newCtx, executor);
+                return this;
+            }
+        }
+        callHandlerAdded0(newCtx);
+        return this;
+    }
+
+
+}
+
+
+==================================AbstractChannelHandlerContext===============================
+
+abstract class AbstractChannelHandlerContext extends DefaultAttributeMap
+        implements ChannelHandlerContext, ResourceLeakHint {
+
+        }
+
+======================================ChannelHandlerContext  --ChannelHandler与ChannelChannelPipeline的纽带=============================
+/**
+*允许{@link ChannelHandler}与其{@link ChannelPipeline}和其他处理程序进行交互。除此之外，
+处理程序还可以通知{@link ChannelPipeline}中的下一个{@link ChannelHandler}以及动态修改它所属的{@link ChannelPipeline}。
+ *
+ * <h3>Notify</h3>
+ *
+*您可以通过调用此处提供的各种方法之一，在同一{@link ChannelPipeline}中通知最近的处理程序。
+ *
+ *请参阅{@link ChannelPipeline}以了解事件的流程。
+ *
+ * <h3>Modifying a pipeline</h3>
+ *
+*您可以通过调用{@link #pipeline（）}获取您的处理程序所属的{@link ChannelPipeline}。非平凡的应用程序可以在运行时动态地插入，移除或替换管道中的处理程序。
+ *
+ * <h3>Retrieving for later use</h3>
+ * <h3>检索以供日后使用</ h3>
+ *
+*您可以保留{@link ChannelHandlerContext}供以后使用，例如在处理程序方法之外触发事件，甚至可以从不同的线程触发。
+ * <pre>
+ * public class MyHandler extends {@link ChannelDuplexHandler} {
+ *
+ *     <b>private {@link ChannelHandlerContext} ctx;</b>
+ *
+ *     public void beforeAdd({@link ChannelHandlerContext} ctx) {
+ *         <b>this.ctx = ctx;</b>
+ *     }
+ *
+ *     public void login(String username, password) {
+ *         ctx.write(new LoginMessage(username, password));
+ *     }
+ *     ...
+ * }
+ * </pre>
+ *
+ * <h3>Storing stateful information</h3>
+ * <h3>存储有状态信息</h3>
+ *
+* {@link #attr（AttributeKey）}允许您存储和访问与处理程序及其上下文相关的有状态信息。请参阅{@link ChannelHandler}以了解管理有状态信息的各种推荐方法。
+ *
+ * <h3>A handler can have more than one context</h3>
+ *
+*请注意，{@link ChannelHandler}实例可以添加到多个{@link ChannelPipeline}。
+这意味着单个{@link ChannelHandler}实例可以有多个{@link ChannelHandlerContext}，
+因此如果将单个实例添加到一个或多个{@link ChannelPipeline}，则可以使用不同的{@link ChannelHandlerContext}调用该实例。不止一次。
+ * <p>
+ *例如，以下处理程序将具有与管道添加的次数一样多的独立{@link AttributeKey}，
+ 无论它是多次添加到同一管道还是多次添加到不同管道：
+ * <pre>
+ * public class FactorialHandler extends {@link ChannelInboundHandlerAdapter} {
+ *
+ *   private final {@link AttributeKey}&lt;{@link Integer}&gt; counter = {@link AttributeKey}.valueOf("counter");
+ *
+ *   // This handler will receive a sequence of increasing integers starting
+ *   // from 1.
+ *   {@code @Override}
+ *   public void channelRead({@link ChannelHandlerContext} ctx, Object msg) {
+ *     Integer a = ctx.attr(counter).get();
+ *
+ *     if (a == null) {
+ *       a = 1;
+ *     }
+ *
+ *     attr.set(a * (Integer) msg);
+ *   }
+ * }
+ *
+ * // Different context objects are given to "f1", "f2", "f3", and "f4" even if
+ * // they refer to the same handler instance.  Because the FactorialHandler
+ * // stores its state in a context object (using an {@link AttributeKey}), the factorial is
+ * // calculated correctly 4 times once the two pipelines (p1 and p2) are active.
+ * // 不同的上下文对象被赋予“f1”，“f2”，“f3”和“f4”，即使它们引用相同的处理程序实例。
+     因为FactorialHandler将其状态存储在上下文对象中（使用{@link AttributeKey}），所以一旦两个管道（p1和p2）处于活动状态，就会正确计算4次析因。
+ * FactorialHandler fh = new FactorialHandler();
+ *
+ * {@link ChannelPipeline} p1 = {@link Channels}.pipeline();
+ * p1.addLast("f1", fh);
+ * p1.addLast("f2", fh);
+ *
+ * {@link ChannelPipeline} p2 = {@link Channels}.pipeline();
+ * p2.addLast("f3", fh);
+ * p2.addLast("f4", fh);
+ * </pre>
+ *
+ * <h3>Additional resources worth reading</h3>
+ * <p>
+ *请参阅{@link ChannelHandler}和{@link ChannelPipeline}以了解有关入站和出站操作的更多信息，它们有哪些基本差异，它们如何在管道中流动以及如何处理应用程序中的操作。
+ * /
+public interface ChannelHandlerContext extends AttributeMap, ChannelInboundInvoker, ChannelOutboundInvoker {
+
+}

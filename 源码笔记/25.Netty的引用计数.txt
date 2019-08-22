@@ -1,0 +1,65 @@
+/**
+*需要显式释放的引用计数对象。
+ * <p>
+ *当实例化新的{@link ReferenceCounted}时，它以{@code 1}的引用计数开始。
+  {@link #retain（）}增加引用计数，{@ link #release（）}减少引用计数。
+  如果引用计数减少到{@code 0}，则将显式释放该对象，并且访问解除分配的对象通常会导致访问冲突。
+ * </ p>
+ * <p>
+ *如果实现{@link ReferenceCounted}的对象是实现{@link ReferenceCounted}的其他对象的容器，
+ 则当容器的引用计数变为0时，包含的对象也将通过{@link #release（）}释放。
+ * </ p>
+ */
+public interface ReferenceCounted {
+
+
+/**
+ * Abstract base class for {@link ByteBuf} implementations that count references.
+ */
+public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
+
+  private static final AtomicIntegerFieldUpdater<AbstractReferenceCountedByteBuf> refCntUpdater =
+            AtomicIntegerFieldUpdater.newUpdater(AbstractReferenceCountedByteBuf.class, "refCnt");
+
+  @Override
+    public ByteBuf retain() {
+        return retain0(1);
+    }
+
+    @Override
+    public ByteBuf retain(int increment) {
+        return retain0(checkPositive(increment, "increment"));
+    }
+    //原版本自旋，新版本这样了
+    private ByteBuf retain0(final int increment) {
+        // all changes to the raw count are 2x the "real" change
+        int adjustedIncrement = increment << 1; // overflow OK here
+        int oldRef = refCntUpdater.getAndAdd(this, adjustedIncrement);
+        if ((oldRef & 1) != 0) {
+            throw new IllegalReferenceCountException(0, increment);
+        }
+        // don't pass 0!
+        if ((oldRef <= 0 && oldRef + adjustedIncrement >= 0)
+                || (oldRef >= 0 && oldRef + adjustedIncrement < oldRef)) {
+            // overflow case
+            refCntUpdater.getAndAdd(this, -adjustedIncrement);
+            throw new IllegalReferenceCountException(realRefCnt(oldRef), increment);
+        }
+        return this;
+    }
+
+=============================ObjectUtil
+/**
+ * A grab-bag of useful utility methods.
+ */
+public final class ObjectUtil {
+  /**
+     * Checks that the given argument is strictly positive. If it is not, throws {@link IllegalArgumentException}.
+     * Otherwise, returns the argument.
+     */
+    public static int checkPositive(int i, String name) {
+        if (i <= 0) {
+            throw new IllegalArgumentException(name + ": " + i + " (expected: > 0)");
+        }
+        return i;
+    }
